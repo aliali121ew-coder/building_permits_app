@@ -76,16 +76,19 @@ class PdfService {
     final doc = pw.Document();
     final assets = await _loadAssets();
 
-    const headers = ['ت', 'رقم الإجازة', 'الاسم الثلاثي', 'رقم القطعة', 'التاريخ', 'الملاحظات'];
+    // حزمة pdf ترسم أعمدة الجدول يسار←يمين ولا تعكسها تلقائياً، لذا نرتّب
+    // الأعمدة عكسياً في المصفوفة كي تُقرأ على الصفحة من اليمين إلى اليسار:
+    // ت | رقم الإجازة | الاسم الثلاثي | رقم القطعة | التاريخ | الملاحظات
+    const headers = ['الملاحظات', 'التاريخ', 'رقم القطعة', 'الاسم الثلاثي', 'رقم الإجازة', 'ت'];
 
-    // تحديد عرض الأعمدة بنسب ثابتة لمنع تجاوز حدود الصفحة
+    // عرض الأعمدة (مطابق للترتيب المعكوس أعلاه)
     final columnWidths = <int, pw.TableColumnWidth>{
-      0: const pw.FixedColumnWidth(25),     // ت (تسلسل)
-      1: const pw.FixedColumnWidth(60),     // رقم الإجازة
-      2: const pw.FlexColumnWidth(3),       // الاسم الثلاثي (مرن - الأعرض)
-      3: const pw.FixedColumnWidth(55),     // رقم القطعة
-      4: const pw.FixedColumnWidth(62),     // التاريخ
-      5: const pw.FlexColumnWidth(2),       // الملاحظات (مرن)
+      0: const pw.FlexColumnWidth(2),       // الملاحظات (مرن)
+      1: const pw.FixedColumnWidth(62),     // التاريخ
+      2: const pw.FixedColumnWidth(55),     // رقم القطعة
+      3: const pw.FlexColumnWidth(3),       // الاسم الثلاثي (مرن - الأعرض)
+      4: const pw.FixedColumnWidth(60),     // رقم الإجازة
+      5: const pw.FixedColumnWidth(25),     // ت (تسلسل)
     };
 
     doc.addPage(
@@ -118,12 +121,12 @@ class PdfService {
                 .asMap()
                 .entries
                 .map((entry) => [
-                      '${entry.key + 1}',
-                      '${entry.value.permitYear}/${entry.value.permitNumber}',
-                      entry.value.fullName,
-                      entry.value.plotNumber,
-                      AppDateUtils.formatDate(entry.value.permitDate),
                       entry.value.notes,
+                      AppDateUtils.formatDate(entry.value.permitDate),
+                      entry.value.plotNumber,
+                      entry.value.fullName,
+                      '${entry.value.permitYear}/${entry.value.permitNumber}',
+                      '${entry.key + 1}',
                     ])
                 .toList(),
             headerStyle: pw.TextStyle(font: assets.arabicBold, fontSize: 7, color: PdfColors.white),
@@ -172,10 +175,11 @@ class PdfService {
       tableData.add(['الاسم حسب السجل الجديد', permit.namePerNewRegistry]);
     }
 
-    // الجدول الفردي الرسمي
+    // الجدول الفردي الرسمي — أعمدة معكوسة لتُقرأ يميناً←يساراً:
+    // المعلومات (يمين) | التفاصيل (يسار)
     final columnWidths = <int, pw.TableColumnWidth>{
-      0: const pw.FlexColumnWidth(2), // البيان
-      1: const pw.FlexColumnWidth(3), // القيمة
+      0: const pw.FlexColumnWidth(3), // التفاصيل (القيمة)
+      1: const pw.FlexColumnWidth(2), // المعلومات (البيان)
     };
 
     // تجميع الصور المرفقة
@@ -219,9 +223,10 @@ class PdfService {
             ),
             pw.SizedBox(height: 14),
             pw.TableHelper.fromTextArray(
-              headers: ['البيان', 'التفاصيل'],
+              // ترتيب معكوس ليُقرأ يميناً←يساراً: المعلومات (يمين) | التفاصيل (يسار)
+              headers: ['التفاصيل', 'المعلومات'],
               columnWidths: columnWidths,
-              data: tableData,
+              data: tableData.map((row) => [row[1], row[0]]).toList(),
               headerStyle: pw.TextStyle(font: assets.arabicBold, fontSize: 10, color: PdfColors.white),
               headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF2A5C8A)),
               headerAlignment: pw.Alignment.center,
