@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/utils/attachment_storage.dart';
 import '../../core/utils/validators.dart';
 import '../../l10n/app_strings.dart';
 import '../../models/permit_model.dart';
@@ -122,8 +123,11 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
           );
           return;
         }
+        // نسخ الملف إلى مجلد دائم كي لا يحذفه النظام عند تنظيف الكاش
+        final savedPath = await AttachmentStorage.persist(path);
+        if (!mounted) return;
         setState(() {
-          _attachmentPaths.add(path);
+          _attachmentPaths.add(savedPath);
         });
       }
     } catch (_) {
@@ -250,8 +254,11 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
           );
           return;
         }
+        // نسخ الصورة إلى مجلد دائم كي لا يحذفها النظام عند تنظيف الكاش
+        final savedPath = await AttachmentStorage.persist(photo.path);
+        if (!mounted) return;
         setState(() {
-          _attachmentPaths.add(photo.path);
+          _attachmentPaths.add(savedPath);
         });
       }
     } catch (_) {
