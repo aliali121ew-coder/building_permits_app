@@ -12,3 +12,9 @@ windows/flutter/ephemeral/
 linux/flutter/ephemeral/
 macos/Flutter/ephemeral/
 *.g.dart
+
+# Kotlin build cache & error logs (build artifacts, not source)
+android/.kotlin/
+
+# Compressed archives should not be committed to the repo
+*.rar
