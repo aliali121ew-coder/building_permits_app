@@ -1,0 +1,6 @@
+حمّل خط Cairo (Regular, Bold, SemiBold) من Google Fonts:
+https://fonts.google.com/specimen/Cairo
+وضع الملفات هنا بهذه الأسماء بالضبط:
+Cairo-Regular.ttf
+Cairo-Bold.ttf
+Cairo-SemiBold.ttf

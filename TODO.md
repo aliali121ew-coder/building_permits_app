@@ -1,0 +1,4 @@
+- [ ] تحديث `lib/screens/admin/licensing_screen.dart` لعرض:
+  - [ ] تاريخ التفعيل (licenseStartAt)
+  - [ ] وقت الانتهاء (licenseEndAt) تحت العدّ التنازلي (status) داخل تبويب الحسابات
+- [ ] التأكد أن العدّ التنازلي الحالي لا يتغير
