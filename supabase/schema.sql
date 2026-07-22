@@ -17,13 +17,11 @@ create table if not exists public.profiles (
     full_name text not null,
     role text not null default 'employee' check (role in ('admin', 'employee')),
     is_active boolean not null default true,
-    can_add boolean not null default true,
-    can_edit boolean not null default true,
-    can_delete boolean not null default false,
-    can_view boolean not null default true,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
-);
+-- إضافة أعمدة الصلاحيات لجدول profiles في حال عدم وجودها
+alter table public.profiles add column if not exists can_add boolean not null default true;
+alter table public.profiles add column if not exists can_edit boolean not null default true;
+alter table public.profiles add column if not exists can_delete boolean not null default false;
+alter table public.profiles add column if not exists can_view boolean not null default true;
 
 comment on table public.profiles is 'ملفات تعريف الموظفين وصلاحياتهم (admin / employee)';
 
