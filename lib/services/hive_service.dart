@@ -62,6 +62,14 @@ class HiveService {
     await _permitsBox.delete(id);
   }
 
+  /// مسح كل بيانات الإجازات المحلية + طابور المزامنة + وقت آخر مزامنة
+  /// (يُستخدم في "التحديث الكامل من الخادم" لإزالة أي بيانات قديمة/مكررة محلياً)
+  Future<void> clearAllPermitsData() async {
+    await _permitsBox.clear();
+    await _pendingOpsBox.clear();
+    await _settingsBox.delete(AppConstants.keyLastSyncAt);
+  }
+
   List<PermitModel> getPermitsByYear(int year) {
     return getAllPermits().where((p) => p.permitYear == year).toList()
       ..sort((a, b) => a.permitNumber.compareTo(b.permitNumber));

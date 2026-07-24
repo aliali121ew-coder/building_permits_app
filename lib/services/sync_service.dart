@@ -223,4 +223,29 @@ class SyncService {
     _dataChangedController.add(null);
     _statusController.add(SyncStatus.idle);
   }
+
+  /// تحديث كامل: يمسح النسخة المحلية بالكامل ثم يعيد تنزيل كل الإجازات من الخادم.
+  /// يُستخدم لإزالة أي بيانات قديمة/مكررة تراكمت محلياً بعد استبدال بيانات الخادم.
+  /// تنبيه: يتجاهل أي تعديلات محلية غير مُزامَنة (الخادم هو المصدر الموثوق).
+  Future<void> fullRefreshFromServer() async {
+    if (!SupabaseService.isConfigured) {
+      throw Exception('يلزم الاتصال بالخادم لإجراء التحديث الكامل.');
+    }
+    _isSyncing = true;
+    _statusController.add(SyncStatus.syncing);
+    try {
+      await _hive.clearAllPermitsData();
+      _dataChangedController.add(null);
+      final all = await _supa.fetchAllPermits();
+      await _hive.upsertManyPermits(all);
+      await _hive.setLastSyncAt(DateTime.now().toUtc());
+      _dataChangedController.add(null);
+      _statusController.add(SyncStatus.idle);
+    } catch (e) {
+      _statusController.add(SyncStatus.error);
+      rethrow;
+    } finally {
+      _isSyncing = false;
+    }
+  }
 }
