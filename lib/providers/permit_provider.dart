@@ -227,6 +227,12 @@ class PermitProvider extends ChangeNotifier {
 
   Future<void> forceSync() => _sync.forceFullSync();
 
+  /// تحديث كامل: مسح النسخة المحلية وإعادة السحب من الخادم، ثم إعادة بناء القوائم.
+  Future<void> fullRefresh() async {
+    await _sync.fullRefreshFromServer();
+    _refresh();
+  }
+
   @override
   void dispose() {
     _dataSub?.cancel();

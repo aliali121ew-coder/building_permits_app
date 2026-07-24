@@ -4,6 +4,7 @@ import '../../core/constants/app_colors.dart';
 import '../../l10n/app_strings.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
+import '../../providers/permit_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../admin/user_management_screen.dart';
 import '../auth/login_screen.dart';
@@ -71,6 +72,19 @@ class SettingsScreen extends StatelessWidget {
               title: Text(context.tr('language')),
               trailing: Text(localeProvider.locale.languageCode == 'ar' ? 'العربية' : 'English'),
               onTap: () => localeProvider.toggle(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.cloud_sync_rounded, color: AppColors.info),
+              title: const Text('تحديث كامل من الخادم', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text(
+                'يمسح النسخة المحلية ويعيد تنزيل كل الإجازات من الخادم (يحل مشكلة البيانات القديمة أو المكررة)',
+                style: TextStyle(fontSize: 11),
+              ),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+              onTap: () => _showFullRefreshDialog(context),
             ),
           ),
           const SizedBox(height: 24),
@@ -347,6 +361,73 @@ class SettingsScreen extends StatelessWidget {
                   child: auth.loading
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                       : const Text('حفظ التحديث', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showFullRefreshDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        bool loading = false;
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              title: const Row(
+                children: [
+                  Icon(Icons.cloud_sync_rounded, color: AppColors.info, size: 26),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'تحديث كامل من الخادم',
+                      style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+              content: const Text(
+                'سيتم مسح النسخة المحلية على هذا الجهاز وإعادة تنزيل كل الإجازات من الخادم.\n\n'
+                'ملاحظة: أي تعديلات محلية لم تُزامَن بعد ستُفقد، والخادم هو المصدر الموثوق. تأكّد من اتصالك بالإنترنت.',
+                style: TextStyle(fontFamily: 'Cairo', fontSize: 13, height: 1.6),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: loading ? null : () => Navigator.pop(ctx),
+                  child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo', color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.info,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: loading
+                      ? null
+                      : () async {
+                          setDialogState(() => loading = true);
+                          try {
+                            await context.read<PermitProvider>().fullRefresh();
+                            if (dialogCtx.mounted) Navigator.pop(ctx);
+                            if (context.mounted) {
+                              _showSnackBar(context, 'تم التحديث الكامل بنجاح من الخادم.', AppColors.secondary);
+                            }
+                          } catch (_) {
+                            setDialogState(() => loading = false);
+                            if (context.mounted) {
+                              _showSnackBar(context, 'تعذّر التحديث الكامل. تحقّق من اتصالك بالإنترنت وأعد المحاولة.', AppColors.danger);
+                            }
+                          }
+                        },
+                  child: loading
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('تأكيد التحديث', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
                 ),
               ],
             );
