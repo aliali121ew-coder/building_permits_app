@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../providers/permit_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../widgets/update_dialog.dart';
 import '../admin/user_management_screen.dart';
 import '../auth/login_screen.dart';
 
@@ -85,6 +86,19 @@ class SettingsScreen extends StatelessWidget {
               ),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
               onTap: () => _showFullRefreshDialog(context),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.system_update_rounded, color: AppColors.info),
+              title: const Text('التحقق من وجود تحديث', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text(
+                'يفحص أحدث إصدار من التطبيق وينزّله ويثبّته إن وُجد',
+                style: TextStyle(fontSize: 11),
+              ),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+              onTap: () => checkAndPromptUpdate(context, silent: false),
             ),
           ),
           const SizedBox(height: 24),

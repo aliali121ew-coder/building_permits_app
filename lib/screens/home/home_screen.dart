@@ -18,6 +18,7 @@ import '../search/search_screen.dart';
 import '../search/search_history_screen.dart';
 import '../settings/settings_screen.dart';
 import '../settings/profile_screen.dart';
+import '../../widgets/update_dialog.dart';
 import 'widgets/glass_stat_card.dart';
 
 /// الشاشة الرئيسية الرسمية لمديرية بلدية الهاشمية - قسم الإجازات
@@ -69,6 +70,8 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<PermitProvider>().init();
+        // فحص تلقائي لوجود تحديث للتطبيق (صامت إن لم يوجد)
+        checkAndPromptUpdate(context);
       }
     });
   }

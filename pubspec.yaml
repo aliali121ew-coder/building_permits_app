@@ -51,6 +51,10 @@ dependencies:
   cached_network_image: ^3.3.1
   device_info_plus: ^10.1.0
 
+  # ---- التحديث داخل التطبيق (In-App Update) ----
+  package_info_plus: ^8.0.0
+  dio: ^5.4.0
+
   # ---- الأيقونات وتأثيرات الواجهة ----
   cupertino_icons: ^1.0.6
   glassmorphism: ^3.0.0
