@@ -18,3 +18,8 @@ android/.kotlin/
 
 # Compressed archives should not be committed to the repo
 *.rar
+
+# Android signing secrets — NEVER commit these
+android/key.properties
+**/*.jks
+**/*.keystore
