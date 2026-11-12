@@ -135,24 +135,8 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
     } else {
-      String errorMessage = auth.error ?? 'حدث خطأ أثناء تسجيل الدخول';
-      
-      if (errorMessage.contains('invalid_credentials') || 
-          errorMessage.contains('Invalid login credentials') ||
-          errorMessage.contains('Invalid claims') ||
-          errorMessage.contains('400')) {
-        errorMessage = 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
-      } else if (errorMessage.contains('user_not_found') || 
-                 errorMessage.contains('User not found')) {
-        errorMessage = 'الحساب غير موجود.';
-      } else if (errorMessage.contains('إيقاف') || 
-                 errorMessage.contains('غير نشط') || 
-                 errorMessage.contains('معطل') ||
-                 errorMessage.contains('مراجعة مسؤول النظام')) {
-        errorMessage = 'عذراً، هذا الحساب في انتظار موافقة وتفعيل مدير النظام. يرجى مراجعة الإدارة.';
-      }
-      
-      _showErrorSnackBar(errorMessage);
+      // رسالة قصيرة مباشرة من الخادم (مثل: «كلمة المرور خطأ»)
+      _showErrorSnackBar(auth.error ?? 'تعذر تسجيل الدخول');
     }
   }
 

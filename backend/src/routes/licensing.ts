@@ -2,6 +2,14 @@ import { Hono } from 'hono';
 import { Env, Profile, UserPayload } from '../types';
 import { adminOnlyMiddleware, authMiddleware } from '../middleware/auth';
 import { formatProfile } from './auth';
+import { activityStmt } from '../utils/activity';
+import { hashPassword } from '../utils/crypto';
+
+/** اسم صاحب الحساب للسجل (قراءة صف واحد) */
+async function nameOf(db: D1Database, id: string): Promise<string> {
+  const r = await db.prepare('SELECT full_name FROM profiles WHERE id = ?').bind(id).first<{ full_name: string }>();
+  return r?.full_name || 'مستخدم';
+}
 
 const licensing = new Hono<{ Bindings: Env; Variables: { user: UserPayload } }>();
 
@@ -113,11 +121,35 @@ licensing.put('/profile/:id', async (c) => {
   const existing = await c.env.DB.prepare('SELECT * FROM profiles WHERE id = ?').bind(targetId).first<Profile>();
   if (!existing) return c.json({ error: 'الحساب غير موجود' }, 404);
 
+  // تعديل الملف الشخصي الذاتي: الاسم والصورة والهاتف وتاريخ الميلاد فقط (لا البريد ولا الصلاحيات)
+  if (caller.id === targetId && data.role === undefined && data.can_add === undefined) {
+    const name = String(data.full_name ?? existing.full_name).trim();
+    const avatar = data.avatar_path !== undefined ? data.avatar_path : existing.avatar_path;
+    const changes: string[] = [];
+    if (name !== existing.full_name) changes.push(`الاسم: «${existing.full_name}» ← «${name}»`);
+    if ((avatar ?? null) !== (existing.avatar_path ?? null)) changes.push('غيّر الصورة الشخصية');
+
+    const stmts = [
+      c.env.DB.prepare('UPDATE profiles SET full_name = ?, avatar_path = ?, phone_number = ?, birth_date = ? WHERE id = ?').bind(
+        name,
+        avatar ?? null,
+        data.phone_number !== undefined ? data.phone_number : existing.phone_number ?? null,
+        data.birth_date !== undefined ? data.birth_date : existing.birth_date ?? null,
+        targetId,
+      ),
+    ];
+    if (changes.length) {
+      stmts.push(activityStmt(c.env.DB, {
+        actorId: caller.id, actorName: name, targetId, targetName: name,
+        action: 'profile_update', details: changes.join(' • '),
+      }));
+    }
+    await c.env.DB.batch(stmts);
+    return c.json({ message: 'تم تحديث الملف الشخصي' });
+  }
+
   if (caller.role !== 'admin') {
-    await c.env.DB.prepare('UPDATE profiles SET full_name = ?, email = ? WHERE id = ?')
-      .bind(data.full_name ?? existing.full_name, data.email ?? existing.email, targetId)
-      .run();
-    return c.json({ message: 'تم تحديث الاسم بنجاح' });
+    return c.json({ error: 'غير مصرح بتعديل هذا الحساب' }, 403);
   }
 
   await c.env.DB.prepare(`
@@ -150,6 +182,12 @@ licensing.put('/profile/:id', async (c) => {
     data.email ?? existing.email,
     targetId
   ).run();
+
+  await activityStmt(c.env.DB, {
+    actorId: caller.id, actorName: await nameOf(c.env.DB, caller.id),
+    targetId, targetName: existing.full_name,
+    action: 'permissions_update', details: 'عدّل صلاحيات الحساب',
+  }).run();
 
   return c.json({ message: 'تم تحديث الصلاحيات بنجاح' });
 });
@@ -208,6 +246,13 @@ licensing.post('/admin/approve-user', adminOnlyMiddleware, async (c) => {
     VALUES (?, ?, 'تمت الموافقة على الحساب', 'تمت الموافقة على حسابك من قبل الإدارة. يرجى إدخال كود التفعيل للبدء.')
   `).bind(crypto.randomUUID(), user_id).run();
 
+  const admin = c.get('user');
+  await activityStmt(c.env.DB, {
+    actorId: admin.id, actorName: await nameOf(c.env.DB, admin.id),
+    targetId: user_id, targetName: await nameOf(c.env.DB, user_id),
+    action: 'approve', details: 'وافق على الحساب الجديد',
+  }).run();
+
   return c.json({ message: 'تمت الموافقة على الحساب بنجاح' });
 });
 
@@ -235,7 +280,11 @@ licensing.post('/admin/pause-license', adminOnlyMiddleware, async (c) => {
       VALUES (?, ?, 'تم إيقاف الترخيص', 'تم إيقاف ترخيص حسابك مؤقتاً من قبل الإدارة.')
     `).bind(crypto.randomUUID(), user_id).run();
 
-    return c.json({ message: 'تم إيقاف الترخيص' });
+    await activityStmt(c.env.DB, {
+      actorId: c.get('user').id, actorName: await nameOf(c.env.DB, c.get('user').id),
+      targetId: user_id, targetName: profile.full_name, action: 'suspend', details: 'أوقف الحساب',
+    }).run();
+    return c.json({ message: 'تم إيقاف الحساب' });
   } else {
     const secondsLeft = profile.license_paused_seconds_left || 0;
     const newEnd = new Date(Date.now() + secondsLeft * 1000).toISOString();
@@ -255,7 +304,11 @@ licensing.post('/admin/pause-license', adminOnlyMiddleware, async (c) => {
       VALUES (?, ?, 'تم استئناف الترخيص', 'تم استئناف ترخيص حسابك.')
     `).bind(crypto.randomUUID(), user_id).run();
 
-    return c.json({ message: 'تم استئناف الترخيص' });
+    await activityStmt(c.env.DB, {
+      actorId: c.get('user').id, actorName: await nameOf(c.env.DB, c.get('user').id),
+      targetId: user_id, targetName: profile.full_name, action: 'activate', details: 'أعاد تفعيل الحساب',
+    }).run();
+    return c.json({ message: 'تم تفعيل الحساب' });
   }
 });
 
@@ -275,4 +328,80 @@ licensing.post('/admin/generate-code', adminOnlyMiddleware, async (c) => {
   return c.json({ message: 'تم إنشاء كود التفعيل بنجاح' });
 });
 
+// 11) إعادة تعيين كلمة مرور أي مستخدم (المدير) — كلمة المرور نفسها لا تُسجَّل أبداً
+licensing.post('/admin/reset-password', adminOnlyMiddleware, async (c) => {
+  const admin = c.get('user');
+  const { user_id, new_password } = await c.req.json();
+  if (!user_id || !new_password || String(new_password).length < 6) {
+    return c.json({ error: 'كلمة المرور الجديدة يجب أن لا تقل عن 6 أحرف' }, 400);
+  }
+  const target = await nameOf(c.env.DB, user_id);
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE profiles SET password_hash = ? WHERE id = ?').bind(await hashPassword(String(new_password)), user_id),
+    activityStmt(c.env.DB, {
+      actorId: admin.id, actorName: await nameOf(c.env.DB, admin.id),
+      targetId: user_id, targetName: target, action: 'password_reset', details: 'أعاد تعيين كلمة المرور',
+    }),
+    c.env.DB.prepare(`INSERT INTO notifications (id, user_id, title, message) VALUES (?, ?, 'تغيير كلمة المرور', 'قامت الإدارة بإعادة تعيين كلمة مرور حسابك.')`)
+      .bind(crypto.randomUUID(), user_id),
+  ]);
+  return c.json({ message: 'تم تعيين كلمة المرور الجديدة' });
+});
+
+// 12) قفل الحساب لمدة (days > 0) أو فكّ القفل (days = 0)
+licensing.post('/admin/lock', adminOnlyMiddleware, async (c) => {
+  const admin = c.get('user');
+  const { user_id, days } = await c.req.json();
+  const n = Math.max(0, Math.min(36500, parseInt(String(days ?? 0), 10) || 0));
+  const until = n > 0 ? new Date(Date.now() + n * 86400 * 1000).toISOString() : null;
+  const target = await nameOf(c.env.DB, user_id);
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE profiles SET locked_until = ? WHERE id = ?').bind(until, user_id),
+    activityStmt(c.env.DB, {
+      actorId: admin.id, actorName: await nameOf(c.env.DB, admin.id),
+      targetId: user_id, targetName: target,
+      action: n > 0 ? 'lock' : 'unlock',
+      details: until ? `قفل الحساب ${n} يوماً حتى ${until.slice(0, 10)}` : 'فكّ قفل الحساب',
+    }),
+  ]);
+  return c.json({ message: n > 0 ? 'تم قفل الحساب' : 'تم فك القفل', locked_until: until });
+});
+
+// 13) سجل النشاط الموحد للمدير: نشاط الحسابات + كل إضافة/تعديل/حذف للإجازات.
+//     يُقرأ فقط عند فتح المدير للسجل، 50 حدثاً لكل صفحة عبر الفهارس الزمنية.
+licensing.get('/admin/activity', adminOnlyMiddleware, async (c) => {
+  const before = c.req.query('before') || '9999-12-31';
+  const limit = Math.min(100, parseInt(c.req.query('limit') || '50', 10) || 50);
+
+  const { results } = await c.env.DB.prepare(`
+    SELECT * FROM (
+      SELECT id, actor_name, target_name, action, details, created_at, 'account' AS kind
+      FROM activity_log WHERE created_at < ?1
+      ORDER BY created_at DESC LIMIT ?2
+    )
+    UNION ALL
+    SELECT * FROM (
+      SELECT a.id, a.changed_by_name AS actor_name,
+             COALESCE(json_extract(COALESCE(a.new_data, a.old_data), '$.full_name'), '') AS target_name,
+             'permit_' || a.action AS action,
+             COALESCE(json_extract(COALESCE(a.new_data, a.old_data), '$.permit_year'), '') || '/' ||
+             COALESCE(json_extract(COALESCE(a.new_data, a.old_data), '$.permit_number'), '') AS details,
+             a.changed_at AS created_at, 'permit' AS kind
+      FROM permits_audit_log a WHERE a.changed_at < ?1
+      ORDER BY a.changed_at DESC LIMIT ?2
+    )
+    ORDER BY created_at DESC LIMIT ?2
+  `).bind(before, limit).all();
+
+  return c.json(results);
+});
+
+// 14) عدد طلبات الحسابات الجديدة بانتظار الموافقة (لشارة الإعدادات)
+licensing.get('/admin/pending-count', adminOnlyMiddleware, async (c) => {
+  const r = await c.env.DB.prepare("SELECT count(*) AS n FROM profiles WHERE approval_status = 'pending'").first<{ n: number }>();
+  return c.json({ count: r?.n ?? 0 });
+});
+
 export default licensing;
+

@@ -1,0 +1,18 @@
+# Cloudflare Static Assets: الملفات التي تتغير مع كل نشر تُعاد مطابقتها دائماً (ETag)
+# حتى يلتقط التحديث التلقائي (عدّ 5 ثوانٍ) النسخة الجديدة فوراً بدل نسخة المتصفح القديمة.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/flutter_bootstrap.js
+  Cache-Control: no-cache
+/main.dart.js
+  Cache-Control: no-cache
+/version.json
+  Cache-Control: no-cache
+
+# الخطوط والصور والأيقونات ثابتة: كاش طويل
+/assets/*
+  Cache-Control: public, max-age=604800
+/canvaskit/*
+  Cache-Control: public, max-age=604800

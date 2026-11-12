@@ -1,14 +1,10 @@
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
-import '../services/supabase_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final AuthService _auth = AuthService.instance;
   UserModel? _user;
-  RealtimeChannel? _profileChannel;
   bool _loading = false;
   String? _error;
 
@@ -18,19 +14,16 @@ class AuthProvider extends ChangeNotifier {
   bool get loading => _loading;
   String? get error => _error;
 
-  Future<void> restoreSession() => _run<void>(() async {
-        _user = await _auth.restoreSession();
-        _listenToProfile();
-      });
+  /// «تذكرني»: يعيد المستخدم المحفوظ فوراً، ثم يحدّث ملفه من الخادم في الخلفية
+  /// (بطء الشبكة لا يعيد المستخدم إلى شاشة الدخول أبداً).
+  void restoreSession() {
+    _user = _auth.restoreCachedUser();
+    notifyListeners();
+    if (_user != null) refreshUser();
+  }
 
   Future<bool> signIn(String email, String password) => _run<bool>(() async {
         _user = await _auth.signIn(email: email, password: password);
-        _listenToProfile();
-        return true;
-      }, fallback: false);
-
-  Future<bool> signInDemo({String role = 'admin'}) => _run<bool>(() async {
-        _user = await _auth.signInDemo(role: role);
         return true;
       }, fallback: false);
 
@@ -46,11 +39,6 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> activateWithCode(String code) => _run<bool>(() async {
         _user = await _auth.activateWithCode(code);
-        return true;
-      }, fallback: false);
-
-  Future<bool> updatePassword(String password) => _run<bool>(() async {
-        await _auth.updatePassword(password);
         return true;
       }, fallback: false);
 
@@ -82,21 +70,9 @@ class AuthProvider extends ChangeNotifier {
       });
 
   Future<void> signOut() async {
-    // إلغاء الاشتراك في الاستماع لقاعدة البيانات في الخلفية
-    final pc = _profileChannel;
-    _profileChannel = null;
-    if (pc != null) {
-      pc.unsubscribe().catchError((_) => '');
-    }
-    
-    // تسجيل الخروج محلياً فوراً لتحديث واجهة المستخدم دون انتظار
     _user = null;
     notifyListeners();
-    
-    // إتمام تسجيل الخروج من السيرفر في الخلفية
-    try {
-      await _auth.signOut();
-    } catch (_) {}
+    await _auth.signOut();
   }
 
   Future<T> _run<T>(Future<T> Function() action, {T? fallback}) async {
@@ -113,22 +89,5 @@ class AuthProvider extends ChangeNotifier {
       _loading = false;
       notifyListeners();
     }
-  }
-
-  void _listenToProfile() {
-    final id = _user?.id;
-    if (id == null || id.startsWith('demo-')) return;
-    _profileChannel?.unsubscribe();
-    _profileChannel =
-        SupabaseService.instance.subscribeToProfileChanges(id, (_) async {
-      _user = await _auth.refreshCurrentProfile() ?? _user;
-      notifyListeners();
-    });
-  }
-
-  @override
-  void dispose() {
-    _profileChannel?.unsubscribe();
-    super.dispose();
   }
 }

@@ -5,182 +5,141 @@ import 'package:flutter/foundation.dart';
 
 import '../core/constants/app_constants.dart';
 import '../models/user_model.dart';
+import 'cloudflare_api_service.dart';
 import 'hive_service.dart';
-import 'supabase_service.dart';
 
 class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  final SupabaseService _supa = SupabaseService.instance;
+  final CloudflareApiService _api = CloudflareApiService.instance;
   final HiveService _hive = HiveService.instance;
   UserModel? _currentUser;
   UserModel? get currentUser => _currentUser;
 
-  Future<UserModel?> restoreSession() async {
+  bool get _hasToken => (_hive.getAuthToken() ?? '').isNotEmpty;
+
+  /// يعيد المستخدم المحفوظ محلياً فوراً (بدون انتظار الشبكة) — أساس «تذكرني».
+  UserModel? restoreCachedUser() {
     final cached = _hive.getCachedUser();
-    if (cached != null)
+    if (cached != null && _hasToken) {
       _currentUser = UserModel.fromMap(Map<String, dynamic>.from(cached));
-    if (!SupabaseService.isConfigured || _supa.currentSession == null)
-      return _currentUser;
-    return refreshCurrentProfile(timeout: const Duration(seconds: 3));
-  }
-
-  Future<UserModel> signIn(
-      {required String email, required String password}) async {
-    if (!SupabaseService.isConfigured)
-      throw Exception('لم يتم ربط مشروع Supabase بعد.');
-    
-    // إضافة مهلة زمنية لتجنب التعليق اللانهائي في الشبكات غير المستقرة
-    await _supa.signIn(email: email, password: password).timeout(
-      const Duration(seconds: 12),
-      onTimeout: () => throw Exception('انتهت مهلة الاتصال بالخادم. يرجى التحقق من تغطية الإنترنت وإعادة المحاولة.'),
-    );
-
-    var profile = await _supa.fetchCurrentProfile().timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => throw Exception('انتهت مهلة جلب بيانات الحساب. يرجى إعادة المحاولة.'),
-    );
-
-    if (profile == null && _supa.currentAuthUser != null) {
-      final isAdmin = _isSystemAdmin(email);
-      profile = UserModel(
-        id: _supa.currentAuthUser!.id,
-        fullName: isAdmin ? 'مدير النظام' : (email.split('@').first),
-        role: isAdmin ? AppConstants.roleAdmin : AppConstants.roleEmployee,
-        isActive: true,
-        canAdd: true,
-        canEdit: true,
-        canDelete: isAdmin,
-        canView: true,
-        email: email,
-        approvalStatus: isAdmin ? 'approved' : 'pending',
-      );
-      await _supa.createProfile(profile).timeout(
-        const Duration(seconds: 8),
-        onTimeout: () => throw Exception('انتهت مهلة إنشاء ملف التعريف في السيرفر.'),
-      );
-    }
-    if (profile == null) throw Exception('لا يوجد ملف تعريف لهذا المستخدم.');
-    
-    // تحديث البريد الإلكتروني تلقائياً في قاعدة البيانات إن كان فارغاً
-    if (profile.email == null || profile.email != email) {
-      profile = profile.copyWith(email: email);
-      await _supa.updateProfileLicensing(profile.id, {'email': email}).catchError((_) => null);
-    }
-    
-    _currentUser = _withAdminPrivileges(profile, email);
-    await _cache(_currentUser!);
-    _registerCurrentDevice();
-    return _currentUser!;
-  }
-
-  Future<void> signUp(
-          {required String email,
-          required String password,
-          required String fullName}) =>
-      _supa.signUp(email: email, password: password, fullName: fullName);
-
-  Future<UserModel> activateWithCode(String code) async {
-    if (_currentUser == null) throw Exception('يجب تسجيل الدخول أولاً.');
-    await _supa.consumeActivationCode(code: code.trim().toUpperCase());
-    return (await refreshCurrentProfile()) ??
-        (throw Exception('تعذر تحديث حالة الترخيص.'));
-  }
-
-  Future<UserModel?> refreshCurrentProfile(
-      {Duration timeout = const Duration(seconds: 5)}) async {
-    if (!SupabaseService.isConfigured || _supa.currentSession == null)
-      return _currentUser;
-    try {
-      final fresh = await _supa.fetchCurrentProfile().timeout(timeout);
-      if (fresh != null) {
-        var updated = fresh;
-        final authEmail = _supa.currentAuthUser?.email;
-        if (authEmail != null && (fresh.email == null || fresh.email != authEmail)) {
-          updated = fresh.copyWith(email: authEmail);
-          await _supa.updateProfileLicensing(fresh.id, {'email': authEmail}).catchError((_) => null);
-        }
-        _currentUser =
-            _withAdminPrivileges(updated, authEmail);
-        await _cache(_currentUser!);
-      }
-    } catch (_) {
-      // Keep the last server-verified profile while offline.
     }
     return _currentUser;
   }
 
-  Future<void> updatePassword(String password) =>
-      _supa.updatePassword(password);
-
-  Future<void> changePassword(
-      {required String oldPassword, required String newPassword}) async {
-    final email = _currentUser?.email;
-    if (email == null) throw Exception('المستخدم غير مسجل الدخول.');
-    if (SupabaseService.isConfigured)
-      await _supa.signIn(email: email, password: oldPassword);
-    await _supa.updatePassword(newPassword);
-    await _hive.saveLastCredentials(email, newPassword);
-  }
-
-  Future<void> updateUserProfile(
-      {required String fullName,
-      String? birthDate,
-      String? phoneNumber,
-      String? avatarPath}) async {
-    if (_currentUser == null) return;
-    if (SupabaseService.isConfigured)
-      await _supa.updateProfileName(
-          userId: _currentUser!.id, fullName: fullName);
-    _currentUser = _currentUser!.copyWith(
-        fullName: fullName,
-        birthDate: birthDate,
-        phoneNumber: phoneNumber,
-        avatarPath: avatarPath);
+  Future<UserModel> signIn({required String email, required String password}) async {
+    final user = await _api.login(email: email, password: password).timeout(
+          const Duration(seconds: 12),
+          onTimeout: () => throw const ApiException('انتهت مهلة الاتصال بالخادم'),
+        );
+    _currentUser = _withAdminPrivileges(user, email);
     await _cache(_currentUser!);
-  }
-
-  Future<UserModel> signInDemo({String role = AppConstants.roleAdmin}) async {
-    _currentUser = UserModel(
-        id: 'demo-$role-001',
-        fullName: role == AppConstants.roleAdmin ? 'مدير النظام' : 'موظف إدخال',
-        role: role,
-        isActive: true,
-        email: 'demo@building.app',
-        approvalStatus: 'approved',
-        licenseEndAt: DateTime.now().add(const Duration(days: 3650)));
-    await _cache(_currentUser!);
+    // «تذكرني» تلقائياً: حفظ البريد وكلمة المرور (مشفّرة) لإعادة الدخول الصامت عند انتهاء الجلسة
+    await _hive.saveLastCredentials(email.trim(), password);
+    _registerCurrentDevice();
     return _currentUser!;
   }
 
+  Future<void> signUp({required String email, required String password, required String fullName}) async {
+    final user = await _api.register(email: email, password: password, fullName: fullName);
+    await _cache(user);
+  }
+
+  Future<UserModel> activateWithCode(String code) async {
+    if (_currentUser == null) throw const ApiException('يجب تسجيل الدخول أولاً');
+    await _api.activateCode(code.trim().toUpperCase());
+    return (await refreshCurrentProfile()) ?? (throw const ApiException('تعذر تحديث حالة الترخيص'));
+  }
+
+  /// تحديث الملف الشخصي من الخادم. عند انتهاء الجلسة (401) يُعاد الدخول بصمت
+  /// بالبيانات المحفوظة، وإن فشل ذلك يبقى آخر ملف محفوظ (العمل بدون إنترنت).
+  Future<UserModel?> refreshCurrentProfile({Duration timeout = const Duration(seconds: 6)}) async {
+    if (!_hasToken) return _currentUser;
+    try {
+      final fresh = await _api.getMe().timeout(timeout);
+      _currentUser = _withAdminPrivileges(fresh, fresh.email);
+      await _cache(_currentUser!);
+    } on ApiException catch (e) {
+      if (e.statusCode == 401) await _silentRelogin();
+    } catch (_) {
+      // بدون اتصال: نُبقي آخر ملف تم التحقق منه.
+    }
+    return _currentUser;
+  }
+
+  Future<void> _silentRelogin() async {
+    final email = _hive.getLastEmail();
+    final password = await _hive.getLastPassword();
+    if (email.isEmpty || password.isEmpty) return;
+    try {
+      await signIn(email: email, password: password);
+    } catch (_) {}
+  }
+
+  Future<void> changePassword({required String oldPassword, required String newPassword}) async {
+    final email = _currentUser?.email;
+    if (email == null) throw const ApiException('المستخدم غير مسجل الدخول');
+    await _api.changePassword(oldPassword: oldPassword, newPassword: newPassword);
+    await _hive.saveLastCredentials(email, newPassword);
+  }
+
+  Future<void> updateUserProfile({
+    required String fullName,
+    String? birthDate,
+    String? phoneNumber,
+    String? avatarPath,
+  }) async {
+    if (_currentUser == null) return;
+    // صورة جديدة من الجهاز ← تُرفع إلى R2 كي يراها المدير من أي جهاز
+    // (وأيضاً أي صورة قديمة محفوظة محلياً فقط تُرفع مرة واحدة)
+    String? avatar = avatarPath;
+    if (avatar != null && !avatar.startsWith('http')) {
+      final file = File(avatar);
+      avatar = (kIsWeb || !file.existsSync()) ? null : await _api.uploadAttachment(
+        permitId: 'avatars',
+        fileName: 'avatar_${_currentUser!.id}.png',
+        bytes: await file.readAsBytes(),
+      );
+    }
+    await _api.updateProfile(_currentUser!.id, {
+      'full_name': fullName,
+      'avatar_path': avatar,
+      'phone_number': phoneNumber,
+      'birth_date': birthDate,
+    });
+    _currentUser = _currentUser!.copyWith(
+      fullName: fullName,
+      birthDate: birthDate,
+      phoneNumber: phoneNumber,
+      avatarPath: avatar,
+    );
+    await _cache(_currentUser!);
+  }
+
+  /// تسجيل الخروج: يمسح الجلسة فقط. بيانات «تذكرني» تبقى لتعبئة شاشة الدخول تلقائياً.
   Future<void> signOut() async {
     await _hive.clearCachedUser();
     _currentUser = null;
-    if (SupabaseService.isConfigured)
-      await _supa
-          .signOut()
-          .timeout(const Duration(seconds: 2), onTimeout: () {});
   }
 
-  UserModel _withAdminPrivileges(UserModel user, String? email) =>
-      _isSystemAdmin(email)
-          ? user.copyWith(
-              role: AppConstants.roleAdmin,
-              isActive: true,
-              canAdd: true,
-              canEdit: true,
-              canDelete: true,
-              canView: true,
-              approvalStatus: 'approved')
-          : user;
-  bool _isSystemAdmin(String? email) =>
-      email?.trim().toLowerCase() == 'see313see@gmail.com' ||
-      email?.trim().toLowerCase() == 'see313see@gmail.cor';
+  UserModel _withAdminPrivileges(UserModel user, String? email) => _isSystemAdmin(email)
+      ? user.copyWith(
+          role: AppConstants.roleAdmin,
+          isActive: true,
+          canAdd: true,
+          canEdit: true,
+          canDelete: true,
+          canView: true,
+          approvalStatus: 'approved')
+      : user;
+
+  bool _isSystemAdmin(String? email) => email?.trim().toLowerCase() == 'see313see@gmail.com';
+
   Future<void> _cache(UserModel user) => _hive.setCachedUser(user.toMap());
 
   Future<void> _registerCurrentDevice() async {
-    if (!SupabaseService.isConfigured || _currentUser == null || kIsWeb) return;
+    if (_currentUser == null || kIsWeb) return;
     try {
       final info = DeviceInfoPlugin();
       String id, name, platform;
@@ -194,20 +153,14 @@ class AuthService {
         id = d.deviceId;
         name = d.computerName;
         platform = 'Windows';
-      } else if (Platform.isIOS) {
-        final d = await info.iosInfo;
-        id = d.identifierForVendor ?? d.name;
-        name = d.name;
-        platform = 'iOS';
       } else {
         id = '${Platform.operatingSystem}-${Platform.localHostname}';
         name = Platform.localHostname;
         platform = Platform.operatingSystem;
       }
-      await _supa.registerCurrentDevice(
-          deviceId: id, deviceName: name, osPlatform: platform);
+      await _api.registerDevice(deviceId: id, deviceName: name, osPlatform: platform);
     } catch (_) {
-      // Device registration is non-blocking; a server rejection is surfaced on the next online check.
+      // تسجيل الجهاز غير حاجب.
     }
   }
 }

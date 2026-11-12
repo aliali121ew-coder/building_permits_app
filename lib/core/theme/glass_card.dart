@@ -65,9 +65,7 @@ class _GlassCardState extends State<GlassCard> with SingleTickerProviderStateMix
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(widget.borderRadius),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-              child: Container(
+            child: Container(
                 padding: widget.padding,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(widget.borderRadius),
@@ -88,7 +86,6 @@ class _GlassCardState extends State<GlassCard> with SingleTickerProviderStateMix
                 ),
                 child: widget.child,
               ),
-            ),
           ),
         ),
       ),

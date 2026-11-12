@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/widgets.dart';
 import 'package:uuid/uuid.dart';
 import '../models/permit_model.dart';
 import '../models/pending_operation.dart';
+import 'cloudflare_api_service.dart';
 import 'connectivity_service.dart';
 import 'hive_service.dart';
-import 'supabase_service.dart';
 
 enum SyncStatus { idle, syncing, offline, error }
 
@@ -17,17 +17,20 @@ class RemoteChangeEvent {
   final String permitLabel;
 }
 
-/// خدمة المزامنة: Offline-First + Realtime
-/// - أي إضافة/تعديل/حذف يُكتب فوراً محلياً في Hive (يعمل التطبيق بدون إنترنت)
-/// - إن وُجد اتصال: يُرسل فوراً إلى Supabase ويُبث لباقي الأجهزة عبر Realtime
-/// - إن انقطع الاتصال: تُحفظ العملية في طابور (pending_ops_box) وتُرسل فور عودة الشبكة تلقائياً
-class SyncService {
+/// خدمة المزامنة (Offline-First) مع خادم Cloudflare D1:
+/// - الحفظ لحظي: أي إضافة/تعديل/حذف يُكتب محلياً ثم يُرسل فوراً للخادم
+///   (أو يُوضع في طابور ويُرسل تلقائياً عند عودة الشبكة).
+/// - جلب تغييرات الآخرين بسحب تفاضلي خفيف (`since`) كل [_pollInterval]،
+///   ويتوقف السحب تماماً والتطبيق في الخلفية لتوفير قراءات D1.
+class SyncService with WidgetsBindingObserver {
   SyncService._();
   static final SyncService instance = SyncService._();
 
+  static const _pollInterval = Duration(seconds: 30);
+
   final _uuid = const Uuid();
   final HiveService _hive = HiveService.instance;
-  final SupabaseService _supa = SupabaseService.instance;
+  final CloudflareApiService _api = CloudflareApiService.instance;
 
   final StreamController<SyncStatus> _statusController = StreamController<SyncStatus>.broadcast();
   final StreamController<RemoteChangeEvent> _remoteChangeController = StreamController<RemoteChangeEvent>.broadcast();
@@ -35,44 +38,67 @@ class SyncService {
 
   Stream<SyncStatus> get statusStream => _statusController.stream;
   Stream<RemoteChangeEvent> get remoteChangeStream => _remoteChangeController.stream;
-  Stream<void> get dataChangedStream => _dataChangedController.stream; // لإعادة بناء الواجهة عند أي تغيير محلي/بعيد
+  Stream<void> get dataChangedStream => _dataChangedController.stream;
 
-  RealtimeChannel? _channel;
-  StreamSubscription<bool>? _connSub;
   Timer? _pollingTimer;
+  bool _started = false;
   bool _isSyncing = false;
+  bool _inForeground = true;
+  SyncStatus _status = SyncStatus.idle;
 
+  void _setStatus(SyncStatus s) {
+    if (s == _status) return; // لا إعادة بناء للواجهة إن لم تتغير الحالة
+    _status = s;
+    _statusController.add(s);
+  }
+
+  void _notifyData() => _dataChangedController.add(null);
+
+  /// آمن للاستدعاء أكثر من مرة (يبدأ مرة واحدة فقط).
   Future<void> start() async {
-    if (!SupabaseService.isConfigured) {
-      _statusController.add(SyncStatus.offline);
-      return;
-    }
+    if (_started) return;
+    _started = true;
+    WidgetsBinding.instance.addObserver(this);
 
-    _connSub = ConnectivityService.instance.onlineStream.listen((online) {
+    ConnectivityService.instance.onlineStream.listen((online) {
       if (online) {
-        _flushPendingThenPull();
+        _sync();
         _startPolling();
       } else {
         _stopPolling();
-        _statusController.add(SyncStatus.offline);
+        _setStatus(SyncStatus.offline);
       }
     });
 
     if (ConnectivityService.instance.isOnline) {
-      _subscribeRealtime();
-      await _flushPendingThenPull();
       _startPolling();
+      await _sync();
     } else {
-      _statusController.add(SyncStatus.offline);
+      _setStatus(SyncStatus.offline);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fg = state == AppLifecycleState.resumed;
+    if (fg == _inForeground) return;
+    _inForeground = fg;
+    if (fg) {
+      // عند العودة للتطبيق: سحب فوري لما فاتنا ثم استئناف الدورة
+      if (ConnectivityService.instance.isOnline) {
+        _sync();
+        _startPolling();
+      }
+    } else {
+      _stopPolling();
     }
   }
 
   void _startPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 25), (_) {
-      if (ConnectivityService.instance.isOnline) {
-        _flushPendingThenPull();
-      }
+    if (!_inForeground) return;
+    _pollingTimer = Timer.periodic(_pollInterval, (_) {
+      if (ConnectivityService.instance.isOnline) _sync();
     });
   }
 
@@ -81,34 +107,22 @@ class SyncService {
     _pollingTimer = null;
   }
 
-  void dispose() {
-    _stopPolling();
-    _connSub?.cancel();
-    _channel?.unsubscribe();
-    _statusController.close();
-    _remoteChangeController.close();
-    _dataChangedController.close();
-  }
-
-  // ===================== عمليات القراءة (تُقرأ محلياً دوماً - سريعة وتعمل بدون نت) =====================
+  // ===================== القراءة (محلية دوماً - سريعة وتعمل بدون نت) =====================
 
   List<PermitModel> getAllPermits() => _hive.getAllPermits();
-  List<PermitModel> getPermitsByYear(int year) => _hive.getPermitsByYear(year);
-  List<int> getAvailableYears() => _hive.getAvailableYears();
-  int suggestNextPermitNumber(int year) => _hive.nextPermitNumberForYear(year);
 
-  // ===================== عمليات الكتابة (Offline-First) =====================
+  // ===================== الكتابة (Offline-First + حفظ لحظي) =====================
 
   Future<PermitModel> addPermit(PermitModel permit) async {
     await _hive.upsertPermit(permit.copyWith(isSyncedLocally: false));
-    _dataChangedController.add(null);
+    _notifyData();
     await _enqueueOrSend(type: 'insert', permit: permit);
     return permit;
   }
 
   Future<PermitModel> updatePermitData(PermitModel permit) async {
     await _hive.upsertPermit(permit.copyWith(isSyncedLocally: false));
-    _dataChangedController.add(null);
+    _notifyData();
     await _enqueueOrSend(type: 'update', permit: permit);
     return permit;
   }
@@ -121,7 +135,7 @@ class SyncService {
       isSyncedLocally: false,
     );
     await _hive.upsertPermit(updated);
-    _dataChangedController.add(null);
+    _notifyData();
     await _enqueueOrSend(type: 'update', permit: updated);
   }
 
@@ -130,51 +144,51 @@ class SyncService {
       opId: _uuid.v4(),
       permitId: permit.id,
       type: type,
-      payload: permit.toSupabaseMap(),
+      payload: permit.toApiMap(),
       createdAt: DateTime.now().toUtc(),
     );
 
     if (!ConnectivityService.instance.isOnline) {
       await _hive.addPendingOp(op);
-      _statusController.add(SyncStatus.offline);
+      _setStatus(SyncStatus.offline);
       return;
     }
 
     try {
-      _statusController.add(SyncStatus.syncing);
-      if (type == 'insert') {
-        final saved = await _supa.insertPermit(op.payload);
-        await _hive.upsertPermit(saved.copyWith(isSyncedLocally: true));
-      } else {
-        final saved = await _supa.updatePermit(permit.id, op.payload);
-        await _hive.upsertPermit(saved.copyWith(isSyncedLocally: true));
-      }
-      _dataChangedController.add(null);
-      _statusController.add(SyncStatus.idle);
+      await _send(op);
+      _setStatus(SyncStatus.idle);
     } catch (_) {
-      // فشل الإرسال رغم وجود اتصال (مثلاً خطأ خادم مؤقت) -> نضعها في الطابور لإعادة المحاولة
+      // فشل مؤقت رغم وجود اتصال -> الطابور يعيد المحاولة في الدورة القادمة
       await _hive.addPendingOp(op);
-      _statusController.add(SyncStatus.error);
+      _setStatus(SyncStatus.error);
     }
   }
 
-  // ===================== تفريغ الطابور المعلّق عند عودة الاتصال =====================
+  /// إرسال عملية واحدة للخادم وحفظ النسخة المؤكدة محلياً
+  Future<void> _send(PendingOperation op) async {
+    final saved = op.type == 'insert'
+        ? await _api.createPermit(op.payload)
+        : await _api.updatePermit(op.permitId, op.payload);
+    if (saved.isDeleted) {
+      await _hive.deletePermitLocally(saved.id);
+    } else {
+      await _hive.upsertPermit(saved.copyWith(isSyncedLocally: true));
+    }
+    _notifyData();
+  }
 
-  Future<void> _flushPendingThenPull() async {
+  // ===================== دورة المزامنة: تفريغ الطابور ثم سحب التغييرات =====================
+
+  /// مزامنة فورية (السحب للتحديث): تجلب التغييرات فقط وليس كل البيانات.
+  Future<void> syncNow() => _sync();
+
+  Future<void> _sync() async {
     if (_isSyncing) return;
     _isSyncing = true;
-    _statusController.add(SyncStatus.syncing);
     try {
-      final pending = _hive.getPendingOps();
-      for (final op in pending) {
+      for (final op in _hive.getPendingOps()) {
         try {
-          if (op.type == 'insert') {
-            final saved = await _supa.insertPermit(op.payload);
-            await _hive.upsertPermit(saved.copyWith(isSyncedLocally: true));
-          } else {
-            final saved = await _supa.updatePermit(op.permitId, op.payload);
-            await _hive.upsertPermit(saved.copyWith(isSyncedLocally: true));
-          }
+          await _send(op);
           await _hive.removePendingOp(op.opId);
         } catch (_) {
           await _hive.updatePendingOp(op.incrementRetry());
@@ -182,89 +196,54 @@ class SyncService {
       }
 
       final lastSync = _hive.getLastSyncAt();
-      final localCount = _hive.getAllPermits().length;
-      final List<PermitModel> changed;
-      if (lastSync == null || localCount == 0) {
-        changed = await _supa.fetchAllPermits();
-      } else {
-        changed = await _supa.fetchChangedSince(lastSync);
-      }
-      await _hive.upsertManyPermits(changed);
-      await _hive.setLastSyncAt(DateTime.now().toUtc());
+      final firstSync = lastSync == null || _hive.permitsCount == 0;
+      if (firstSync) _setStatus(SyncStatus.syncing);
 
-      _dataChangedController.add(null);
-      _statusController.add(SyncStatus.idle);
-      _subscribeRealtime();
+      final changed = firstSync
+          ? await _api.fetchPermits()
+          : await _api.fetchPermits(since: lastSync);
+
+      if (changed.isNotEmpty) {
+        await _applyServerRows(changed);
+        if (!firstSync) _announceRemoteChange(changed);
+        _notifyData();
+      }
+      _setStatus(SyncStatus.idle);
     } catch (_) {
-      _statusController.add(SyncStatus.error);
+      _setStatus(SyncStatus.error);
     } finally {
       _isSyncing = false;
     }
   }
 
-  // ===================== الاستماع اللحظي (Realtime) =====================
-
-  void _subscribeRealtime() {
-    if (_channel != null) return;
-    _channel = _supa.subscribeToPermits(
-      onInsert: (payload) => _handleRemote('insert', payload.newRecord),
-      onUpdate: (payload) => _handleRemote('update', payload.newRecord),
-      onDelete: (payload) => _handleRemote('delete', payload.oldRecord),
-    );
-  }
-
-  void _handleRemote(String action, Map<String, dynamic> record) {
-    try {
-      final permit = PermitModel.fromMap(record);
-      if (action == 'delete') {
-        _hive.deletePermitLocally(permit.id);
+  /// حفظ صفوف الخادم محلياً، ونقل مؤشر المزامنة إلى أحدث `updated_at` من الخادم
+  /// (ساعة الخادم وليس ساعة الجهاز، فلا تضيع تغييرات بسبب فرق التوقيت).
+  Future<void> _applyServerRows(List<PermitModel> rows) async {
+    final live = <PermitModel>[];
+    var latest = _hive.getLastSyncAt();
+    for (final p in rows) {
+      if (latest == null || p.updatedAt.isAfter(latest)) latest = p.updatedAt;
+      if (p.isDeleted) {
+        await _hive.deletePermitLocally(p.id);
       } else {
-        _hive.upsertPermit(permit.copyWith(isSyncedLocally: true));
+        live.add(p.copyWith(isSyncedLocally: true));
       }
-      _dataChangedController.add(null);
-
-      final actor = permit.updatedByName ?? permit.createdByName ?? 'مستخدم آخر';
-      _remoteChangeController.add(RemoteChangeEvent(
-        actorName: actor,
-        action: action,
-        permitLabel: '${permit.fullName} (${permit.permitYear}/${permit.permitNumber})',
-      ));
-    } catch (_) {
-      // تجاهل حمولة غير متوقعة بأمان
     }
+    await _hive.upsertManyPermits(live);
+    if (latest != null) await _hive.setLastSyncAt(latest.toUtc());
   }
 
-  Future<void> forceFullSync() async {
-    _isSyncing = false;
-    final changed = await _supa.fetchAllPermits();
-    await _hive.upsertManyPermits(changed);
-    await _hive.setLastSyncAt(DateTime.now().toUtc());
-    _dataChangedController.add(null);
-    _statusController.add(SyncStatus.idle);
-  }
-
-  /// تحديث كامل: يمسح النسخة المحلية بالكامل ثم يعيد تنزيل كل الإجازات من الخادم.
-  /// يُستخدم لإزالة أي بيانات قديمة/مكررة تراكمت محلياً بعد استبدال بيانات الخادم.
-  /// تنبيه: يتجاهل أي تعديلات محلية غير مُزامَنة (الخادم هو المصدر الموثوق).
-  Future<void> fullRefreshFromServer() async {
-    if (!SupabaseService.isConfigured) {
-      throw Exception('يلزم الاتصال بالخادم لإجراء التحديث الكامل.');
-    }
-    _isSyncing = true;
-    _statusController.add(SyncStatus.syncing);
-    try {
-      await _hive.clearAllPermitsData();
-      _dataChangedController.add(null);
-      final all = await _supa.fetchAllPermits();
-      await _hive.upsertManyPermits(all);
-      await _hive.setLastSyncAt(DateTime.now().toUtc());
-      _dataChangedController.add(null);
-      _statusController.add(SyncStatus.idle);
-    } catch (e) {
-      _statusController.add(SyncStatus.error);
-      rethrow;
-    } finally {
-      _isSyncing = false;
-    }
+  void _announceRemoteChange(List<PermitModel> rows) {
+    final myId = _hive.getCachedUser()?['id']?.toString();
+    final others = rows.where((p) => p.updatedBy != null && p.updatedBy != myId).toList();
+    if (others.isEmpty) return;
+    final p = others.last;
+    _remoteChangeController.add(RemoteChangeEvent(
+      actorName: p.updatedByName ?? 'مستخدم آخر',
+      action: p.isDeleted ? 'delete' : (p.createdAt == p.updatedAt ? 'insert' : 'update'),
+      permitLabel: others.length == 1
+          ? '${p.fullName} (${p.permitYear}/${p.permitNumber})'
+          : '${others.length} إجازات',
+    ));
   }
 }

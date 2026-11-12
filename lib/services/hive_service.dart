@@ -3,7 +3,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../core/constants/app_constants.dart';
 import '../models/permit_model.dart';
 import '../models/pending_operation.dart';
-import '../models/user_model.dart';
 
 /// طبقة التخزين المحلي - كل قراءة/كتابة في التطبيق تمر أولاً من هنا (Offline-First)
 /// لا نستخدم build_runner/Hive TypeAdapters المولّدة تلقائياً؛ نخزّن كخرائط (Map)
@@ -58,33 +57,10 @@ class HiveService {
     }
   }
 
+  int get permitsCount => _permitsBox.length;
+
   Future<void> deletePermitLocally(String id) async {
     await _permitsBox.delete(id);
-  }
-
-  /// مسح كل بيانات الإجازات المحلية + طابور المزامنة + وقت آخر مزامنة
-  /// (يُستخدم في "التحديث الكامل من الخادم" لإزالة أي بيانات قديمة/مكررة محلياً)
-  Future<void> clearAllPermitsData() async {
-    await _permitsBox.clear();
-    await _pendingOpsBox.clear();
-    await _settingsBox.delete(AppConstants.keyLastSyncAt);
-  }
-
-  List<PermitModel> getPermitsByYear(int year) {
-    return getAllPermits().where((p) => p.permitYear == year).toList()
-      ..sort((a, b) => a.permitNumber.compareTo(b.permitNumber));
-  }
-
-  List<int> getAvailableYears() {
-    final years = getAllPermits().map((p) => p.permitYear).toSet().toList();
-    years.sort((a, b) => b.compareTo(a));
-    return years;
-  }
-
-  int nextPermitNumberForYear(int year) {
-    final permits = getPermitsByYear(year);
-    if (permits.isEmpty) return 1;
-    return permits.map((p) => p.permitNumber).reduce((a, b) => a > b ? a : b) + 1;
   }
 
   // ===================== طابور المزامنة =====================
@@ -113,8 +89,6 @@ class HiveService {
   String? getThemeMode() => _settingsBox.get(AppConstants.keyThemeMode) as String?;
   Future<void> setThemeMode(String mode) => _settingsBox.put(AppConstants.keyThemeMode, mode);
 
-  String? getLocale() => _settingsBox.get(AppConstants.keyLocale) as String?;
-  Future<void> setLocale(String locale) => _settingsBox.put(AppConstants.keyLocale, locale);
 
   DateTime? getLastSyncAt() {
     final raw = _settingsBox.get(AppConstants.keyLastSyncAt) as String?;
@@ -184,32 +158,11 @@ class HiveService {
   String getLastEmail() => _settingsBox.get('last_login_email', defaultValue: '') as String;
   
   Future<String> getLastPassword() async {
-    return await _secureStorage.read(key: 'last_login_password') ?? '';
-  }
-
-  // ===================== حسابات الموظفين التجريبية (Demo Users) =====================
-
-  List<UserModel> getDemoProfiles() {
-    final raw = _settingsBox.get('demo_profiles') as List?;
-    if (raw == null || raw.isEmpty) {
-      final cached = getCachedUser();
-      if (cached != null) {
-        return [UserModel.fromMap(Map<String, dynamic>.from(cached))];
-      }
-      return [];
+    try {
+      return await _secureStorage.read(key: 'last_login_password') ?? '';
+    } catch (_) {
+      return '';
     }
-    final list = raw.map((e) => UserModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
-    // تصفية وحذف الأسماء الوهمية المخزنة سابقاً في الكاش المحلي
-    final filtered = list.where((u) => !u.id.startsWith('demo-emp')).toList();
-    if (filtered.length != list.length) {
-      saveDemoProfiles(filtered);
-    }
-    return filtered;
-  }
-
-  Future<void> saveDemoProfiles(List<UserModel> profiles) async {
-    final list = profiles.map((p) => p.toMap()).toList();
-    await _settingsBox.put('demo_profiles', list);
   }
 }
 

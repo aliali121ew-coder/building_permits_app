@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../models/user_model.dart';
-import '../../services/supabase_service.dart';
+import '../../services/cloudflare_api_service.dart';
 import '../../widgets/professional_back_button.dart';
 
 class LicensingScreen extends StatefulWidget {
@@ -17,9 +17,8 @@ class LicensingScreen extends StatefulWidget {
   State<LicensingScreen> createState() => _LicensingScreenState();
 }
 
-class _LicensingScreenState extends State<LicensingScreen>
-    with SingleTickerProviderStateMixin {
-  final _service = SupabaseService.instance;
+class _LicensingScreenState extends State<LicensingScreen> with SingleTickerProviderStateMixin {
+  final _service = CloudflareApiService.instance;
   late final TabController _tabs;
   late Future<List<Map<String, dynamic>>> _codes;
   late Future<List<Map<String, dynamic>>> _devices;
@@ -31,10 +30,9 @@ class _LicensingScreenState extends State<LicensingScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this)
-      ..addListener(() => setState(() {}));
+    _tabs = TabController(length: 3, vsync: this)..addListener(() => setState(() {}));
     _reload();
-    
+
     // تحديث الشاشة كل ثانية لبقاء العداد التنازلي التفاعلي حياً
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _tabs.index == 2) {
@@ -52,18 +50,14 @@ class _LicensingScreenState extends State<LicensingScreen>
 
   void _reload() => setState(() {
         _codes = _service.fetchActivationCodes();
-        _devices = _service.fetchConnectedDevices();
+        _devices = _service.fetchDevices();
         _users = _service.fetchAllProfiles();
       });
 
   String _generateCode() {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     final random = Random.secure();
-    return List.generate(
-        3,
-        (_) =>
-            List.generate(4, (_) => alphabet[random.nextInt(alphabet.length)])
-                .join()).join('-');
+    return List.generate(3, (_) => List.generate(4, (_) => alphabet[random.nextInt(alphabet.length)]).join()).join('-');
   }
 
   Future<void> _createCode() async {
@@ -73,32 +67,24 @@ class _LicensingScreenState extends State<LicensingScreen>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('إنشاء رمز تفعيل',
-              style: TextStyle(fontFamily: 'Cairo')),
+          title: const Text('إنشاء رمز تفعيل', style: TextStyle(fontFamily: 'Cairo')),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             DropdownButtonFormField<int>(
               value: duration,
               decoration: const InputDecoration(labelText: 'مدة الترخيص'),
-              items: _durations
-                  .map((days) => DropdownMenuItem(
-                      value: days, child: Text(_durationLabel(days))))
-                  .toList(),
+              items:
+                  _durations.map((days) => DropdownMenuItem(value: days, child: Text(_durationLabel(days)))).toList(),
               onChanged: (value) => setDialogState(() => duration = value!),
             ),
             const SizedBox(height: 12),
             TextField(
                 controller: email,
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                    labelText: 'البريد المرتبط (اختياري)')),
+                decoration: const InputDecoration(labelText: 'البريد المرتبط (اختياري)')),
           ]),
           actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('إلغاء')),
-            FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('إنشاء'))
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('إنشاء'))
           ],
         ),
       ),
@@ -106,11 +92,8 @@ class _LicensingScreenState extends State<LicensingScreen>
     if (accepted != true) return;
     final code = _generateCode();
     try {
-      await _service.createSecureActivationCode(
-          code: code,
-          durationDays: duration,
-          associatedEmail:
-              email.text.trim().isEmpty ? null : email.text.trim());
+      await _service.generateActivationCode(
+          code: code, durationDays: duration, associatedEmail: email.text.trim().isEmpty ? null : email.text.trim());
       _reload();
       _message('تم إنشاء الرمز: $code', success: true);
     } catch (error) {
@@ -120,7 +103,7 @@ class _LicensingScreenState extends State<LicensingScreen>
 
   Future<void> _approve(UserModel user) async {
     try {
-      await _service.approveLicense(userId: user.id);
+      await _service.approveUser(user.id);
       _reload();
       _message('تمت الموافقة على حساب ${user.fullName} بنجاح. هو الآن بانتظار إدخال رمز التفعيل.', success: true);
     } catch (error) {
@@ -132,34 +115,29 @@ class _LicensingScreenState extends State<LicensingScreen>
     if (user.approvalStatus == 'pending') return 'بانتظار موافقة الإدارة ⏳';
     if (user.licensePaused) return 'الترخيص متوقف مؤقتاً ⏸️';
     if (user.licenseEndAt == null) return 'بانتظار التفعيل بكود 🔑';
-    
+
     final totalSeconds = user.remainingSeconds;
     if (totalSeconds <= 0) return 'منتهي الصلاحية ⚠️';
-    
+
     final days = totalSeconds ~/ 86400;
     final hours = (totalSeconds % 86400) ~/ 3600;
     final minutes = (totalSeconds % 3600) ~/ 60;
     final seconds = totalSeconds % 60;
-    
+
     final parts = <String>[];
     if (days > 0) parts.add('$days يوم');
     if (hours > 0) parts.add('$hours ساعة');
     if (minutes > 0) parts.add('$minutes دقيقة');
     if (days == 0 && hours == 0) parts.add('$seconds ثانية');
-    
+
     return 'ينتهي خلال: ' + parts.join(' و ');
   }
 
   Future<void> _togglePause(UserModel user) async {
     try {
-      await _service.setLicensePaused(
-          userId: user.id, paused: !user.licensePaused);
+      await _service.pauseLicense(userId: user.id, paused: !user.licensePaused);
       _reload();
-      _message(
-          user.licensePaused
-              ? 'تم استئناف الترخيص.'
-              : 'تم إيقاف الترخيص مؤقتاً.',
-          success: true);
+      _message(user.licensePaused ? 'تم استئناف الترخيص.' : 'تم إيقاف الترخيص مؤقتاً.', success: true);
     } catch (error) {
       _message(error.toString());
     }
@@ -169,19 +147,14 @@ class _LicensingScreenState extends State<LicensingScreen>
     final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-              title: const Text('إزالة الجهاز',
-                  style: TextStyle(fontFamily: 'Cairo')),
-              content: Text(
-                  'سيتم السماح لصاحب الحساب بربط جهاز آخر.\n${device['device_name'] ?? ''}',
+              title: const Text('إزالة الجهاز', style: TextStyle(fontFamily: 'Cairo')),
+              content: Text('سيتم السماح لصاحب الحساب بربط جهاز آخر.\n${device['device_name'] ?? ''}',
                   style: const TextStyle(fontFamily: 'Cairo')),
               actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('إلغاء')),
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
                 FilledButton(
                     onPressed: () => Navigator.pop(context, true),
-                    style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.danger),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
                     child: const Text('إزالة'))
               ],
             ));
@@ -195,10 +168,9 @@ class _LicensingScreenState extends State<LicensingScreen>
     }
   }
 
-  void _message(String text, {bool success = false}) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(text, style: const TextStyle(fontFamily: 'Cairo')),
-          backgroundColor: success ? AppColors.secondary : AppColors.danger));
+  void _message(String text, {bool success = false}) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text, style: const TextStyle(fontFamily: 'Cairo')),
+      backgroundColor: success ? AppColors.secondary : AppColors.danger));
   static String _durationLabel(int days) => days == 30
       ? 'شهر واحد'
       : days == 90
@@ -208,53 +180,38 @@ class _LicensingScreenState extends State<LicensingScreen>
               : 'سنة واحدة';
   String _date(dynamic value) {
     final parsed = value is String ? DateTime.tryParse(value) : null;
-    return parsed == null
-        ? '—'
-        : DateFormat('yyyy/MM/dd HH:mm').format(parsed.toLocal());
+    return parsed == null ? '—' : DateFormat('yyyy/MM/dd HH:mm').format(parsed.toLocal());
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
           leading: const ProfessionalBackButton(),
-          title: const Text('إدارة التراخيص والأجهزة',
-              style: TextStyle(fontFamily: 'Cairo')),
-          actions: [
-            IconButton(
-                onPressed: _reload, icon: const Icon(Icons.refresh_rounded))
-          ],
-          bottom: TabBar(
-              controller: _tabs,
-              labelStyle: const TextStyle(fontFamily: 'Cairo'),
-              tabs: const [
-                Tab(icon: Icon(Icons.key_rounded), text: 'رموز التفعيل'),
-                Tab(icon: Icon(Icons.devices_rounded), text: 'الأجهزة'),
-                Tab(icon: Icon(Icons.verified_user_rounded), text: 'الحسابات')
-              ]),
+          title: const Text('إدارة التراخيص والأجهزة', style: TextStyle(fontFamily: 'Cairo')),
+          actions: [IconButton(onPressed: _reload, icon: const Icon(Icons.refresh_rounded))],
+          bottom: TabBar(controller: _tabs, labelStyle: const TextStyle(fontFamily: 'Cairo'), tabs: const [
+            Tab(icon: Icon(Icons.key_rounded), text: 'رموز التفعيل'),
+            Tab(icon: Icon(Icons.devices_rounded), text: 'الأجهزة'),
+            Tab(icon: Icon(Icons.verified_user_rounded), text: 'الحسابات')
+          ]),
         ),
         floatingActionButton: _tabs.index == 0
             ? FloatingActionButton.extended(
                 onPressed: _createCode,
                 icon: const Icon(Icons.add),
-                label: const Text('إنشاء رمز',
-                    style: TextStyle(fontFamily: 'Cairo')))
+                label: const Text('إنشاء رمز', style: TextStyle(fontFamily: 'Cairo')))
             : null,
-        body: TabBarView(
-            controller: _tabs,
-            children: [_codesTab(), _devicesTab(), _usersTab()]),
+        body: TabBarView(controller: _tabs, children: [_codesTab(), _devicesTab(), _usersTab()]),
       );
 
   Widget _codesTab() => FutureBuilder<List<Map<String, dynamic>>>(
       future: _codes,
       builder: (_, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
-          return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
         if (snapshot.hasError) return _error(snapshot.error);
         final rows = snapshot.data ?? [];
         if (rows.isEmpty)
-          return const Center(
-              child: Text('لا توجد رموز تفعيل بعد.',
-                  style: TextStyle(fontFamily: 'Cairo')));
+          return const Center(child: Text('لا توجد رموز تفعيل بعد.', style: TextStyle(fontFamily: 'Cairo')));
         return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: rows.length,
@@ -263,7 +220,7 @@ class _LicensingScreenState extends State<LicensingScreen>
               final row = rows[i];
               final used = row['is_used'] == true;
               final assocEmail = row['associated_email']?.toString();
-              
+
               return Card(
                 color: used ? Colors.grey.shade50 : AppColors.secondary.withValues(alpha: 0.02),
                 elevation: 0.8,
@@ -314,11 +271,11 @@ class _LicensingScreenState extends State<LicensingScreen>
                               color: used ? Colors.green : Colors.orange,
                             ),
                             Text(
-                              used 
+                              used
                                   ? (assocEmail != null ? 'مرتبط بـ: $assocEmail' : 'مرتبط ومفعّل')
                                   : (assocEmail != null ? 'مخصص لـ: $assocEmail' : 'غير مرتبط (متاح للجميع)'),
                               style: TextStyle(
-                                fontFamily: 'Cairo', 
+                                fontFamily: 'Cairo',
                                 fontSize: 12,
                                 fontWeight: used ? FontWeight.w600 : FontWeight.normal,
                                 color: used ? Colors.green.shade700 : Colors.black54,
@@ -363,14 +320,11 @@ class _LicensingScreenState extends State<LicensingScreen>
   Widget _devicesTab() => FutureBuilder<List<Map<String, dynamic>>>(
       future: _devices,
       builder: (_, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
-          return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
         if (snapshot.hasError) return _error(snapshot.error);
         final rows = snapshot.data ?? [];
         if (rows.isEmpty)
-          return const Center(
-              child: Text('لا توجد أجهزة مسجلة.',
-                  style: TextStyle(fontFamily: 'Cairo')));
+          return const Center(child: Text('لا توجد أجهزة مسجلة.', style: TextStyle(fontFamily: 'Cairo')));
         return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: rows.length,
@@ -380,33 +334,25 @@ class _LicensingScreenState extends State<LicensingScreen>
               final profile = row['profiles'];
               final owner = profile is Map ? profile['full_name'] : '—';
               return ListTile(
-                  leading: const Icon(Icons.computer_rounded,
-                      color: AppColors.primary),
-                  title:
-                      Text(row['device_name']?.toString() ?? 'جهاز غير مسمى'),
-                  subtitle: Text(
-                      '$owner • ${row['os_platform'] ?? '—'}\nآخر نشاط: ${_date(row['last_active'])}'),
+                  leading: const Icon(Icons.computer_rounded, color: AppColors.primary),
+                  title: Text(row['device_name']?.toString() ?? 'جهاز غير مسمى'),
+                  subtitle: Text('$owner • ${row['os_platform'] ?? '—'}\nآخر نشاط: ${_date(row['last_active'])}'),
                   isThreeLine: true,
                   trailing: IconButton(
                       tooltip: 'إزالة الجهاز',
                       onPressed: () => _removeDevice(row),
-                      icon: const Icon(Icons.delete_outline_rounded,
-                          color: AppColors.danger)));
+                      icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger)));
             });
       });
 
   Widget _usersTab() => FutureBuilder<List<UserModel>>(
       future: _users,
       builder: (_, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
-          return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
         if (snapshot.hasError) return _error(snapshot.error);
-        final users =
-            (snapshot.data ?? []).where((user) => !user.isAdmin).toList();
+        final users = (snapshot.data ?? []).where((user) => !user.isAdmin).toList();
         if (users.isEmpty)
-          return const Center(
-              child: Text('لا توجد حسابات موظفين.',
-                  style: TextStyle(fontFamily: 'Cairo')));
+          return const Center(child: Text('لا توجد حسابات موظفين.', style: TextStyle(fontFamily: 'Cairo')));
         return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: users.length,
@@ -416,7 +362,7 @@ class _LicensingScreenState extends State<LicensingScreen>
               final pending = user.approvalStatus == 'pending';
               final paused = user.licensePaused;
               final status = _formatCountdown(user);
-              
+
               final cardColor = pending
                   ? AppColors.accent.withValues(alpha: 0.02)
                   : paused
@@ -573,21 +519,15 @@ class _LicensingScreenState extends State<LicensingScreen>
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                           ),
-                          child: const Text('موافقة',
-                              style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)))
+                          child:
+                              const Text('موافقة', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)))
                       : (user.licenseEndAt == null
                           ? const SizedBox.shrink()
                           : IconButton(
                               tooltip: paused ? 'استئناف' : 'إيقاف مؤقت',
                               onPressed: () => _togglePause(user),
-                              icon: Icon(
-                                  paused
-                                      ? Icons.play_circle_fill_rounded
-                                      : Icons.pause_circle_filled_rounded,
-                                  color: paused
-                                      ? AppColors.secondary
-                                      : AppColors.danger,
-                                  size: 28))),
+                              icon: Icon(paused ? Icons.play_circle_fill_rounded : Icons.pause_circle_filled_rounded,
+                                  color: paused ? AppColors.secondary : AppColors.danger, size: 28))),
                 ),
               );
             });
@@ -597,6 +537,5 @@ class _LicensingScreenState extends State<LicensingScreen>
       child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text('تعذر تحميل البيانات: $error',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontFamily: 'Cairo'))));
+              textAlign: TextAlign.center, style: const TextStyle(fontFamily: 'Cairo'))));
 }

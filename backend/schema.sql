@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     phone_number TEXT,
     birth_date TEXT,
     avatar_path TEXT,
+    locked_until TEXT,                         -- قفل مؤقت للحساب حتى هذا التاريخ
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -51,8 +52,7 @@ CREATE TABLE IF NOT EXISTS permits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_permits_year_number ON permits(permit_year, permit_number);
-CREATE INDEX IF NOT EXISTS idx_permits_date ON permits(permit_date);
-CREATE INDEX IF NOT EXISTS idx_permits_not_deleted ON permits(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_permits_updated_at ON permits(updated_at); -- للسحب التفاضلي
 
 -- 3) سجل التدقيق (Audit Log)
 CREATE TABLE IF NOT EXISTS permits_audit_log (
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS permits_audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_permit_id ON permits_audit_log(permit_id);
-CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON permits_audit_log(changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON permits_audit_log(changed_at DESC); -- لسجل نشاط المدير
 
 -- 4) رموز التفعيل والاشتراكات (Activation Codes)
 CREATE TABLE IF NOT EXISTS activation_codes (
@@ -104,7 +104,21 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 
--- 7) تحديثات التطبيق (In-App Updates)
+-- 7) سجل نشاط الحسابات (تسجيل، تغيير كلمة مرور، صلاحيات، قفل...) — يظهر للمدير
+CREATE TABLE IF NOT EXISTS activity_log (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT,
+    actor_name TEXT,
+    target_id TEXT,
+    target_name TEXT,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_created_at ON activity_log(created_at DESC);
+
+-- 8) تحديثات التطبيق (In-App Updates)
 CREATE TABLE IF NOT EXISTS app_updates (
     id TEXT PRIMARY KEY,
     platform TEXT UNIQUE NOT NULL CHECK (platform IN ('android', 'windows')),

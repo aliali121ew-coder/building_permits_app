@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'package:barcode/barcode.dart' as bc;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +26,13 @@ class PermitDetailScreen extends StatefulWidget {
       transitionDuration: const Duration(milliseconds: 320),
       pageBuilder: (ctx, anim1, anim2) => PermitDetailScreen(permit: permit, canEdit: canEdit),
       transitionBuilder: (ctx, anim1, anim2, child) {
+        if (MediaQuery.sizeOf(ctx).width < _phoneBreakpoint) {
+          return SlideTransition(
+            position: Tween(begin: const Offset(0, 1), end: Offset.zero)
+                .animate(CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic)),
+            child: child,
+          );
+        }
         final scale = CurvedAnimation(parent: anim1, curve: Curves.easeOutBack).value;
         return Transform.scale(
           scale: scale.clamp(0.88, 1.0),
@@ -39,6 +45,9 @@ class PermitDetailScreen extends StatefulWidget {
     );
   }
 
+  /// أقل من هذا العرض = هاتف (عرض كـ Bottom Sheet)
+  static const double _phoneBreakpoint = 600;
+
   @override
   State<PermitDetailScreen> createState() => _PermitDetailScreenState();
 }
@@ -49,6 +58,9 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
   bool _printingBarcode = false;
 
   PermitModel get permit => widget.permit;
+
+  /// 200.0 ← 200 ، و 248.66 تبقى كما هي
+  static String _area(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
   void _showBarcodeDialog() {
     final qrSvg = bc.Barcode.qrCode().toSvg(
@@ -117,8 +129,8 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
       'رقم القطعة / العقار: ${permit.plotNumber}',
       'التاريخ: ${AppDateUtils.formatDate(permit.permitDate)}',
       if (permit.permitType.isNotEmpty) 'نوع الإجازة: ${permit.permitType}',
-      if (permit.plotArea != null) 'مساحة العرصة: ${permit.plotArea} م²',
-      if (permit.buildingArea != null) 'مساحة البناء: ${permit.buildingArea} م²',
+      if (permit.plotArea != null) 'مساحة العرصة: ${_area(permit.plotArea!)} م²',
+      if (permit.buildingArea != null) 'مساحة البناء: ${_area(permit.buildingArea!)} م²',
       if (permit.notes.isNotEmpty) 'الملاحظات: ${permit.notes}',
     ].join('\n');
 
@@ -190,79 +202,85 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final size = MediaQuery.sizeOf(context);
+    final isPhone = size.width < PermitDetailScreen._phoneBreakpoint;
+    final radius = isPhone ? const BorderRadius.vertical(top: Radius.circular(28)) : BorderRadius.circular(28);
 
-    return BackdropFilter(
-      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-      child: Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        elevation: 0,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 640),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xF21E293B) : const Color(0xFAFFFFFF),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(
-              color: isDark ? Colors.white.withValues(alpha: 0.16) : AppColors.primary.withValues(alpha: 0.22),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.45),
-                blurRadius: 40,
-                spreadRadius: 4,
-                offset: const Offset(0, 18),
-              ),
-              BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.25),
-                blurRadius: 24,
-                spreadRadius: -4,
-                offset: const Offset(0, 8),
-              ),
-            ],
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      alignment: isPhone ? Alignment.bottomCenter : Alignment.center,
+      insetPadding: isPhone ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      elevation: 0,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: isPhone ? double.infinity : 640,
+          // على الهاتف: لا يتجاوز 90% من الشاشة (لا يصعد تحت شريط الحالة)
+          maxHeight: isPhone ? size.height * 0.9 : double.infinity,
+        ),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xF21E293B) : const Color(0xFAFFFFFF),
+          borderRadius: radius,
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.16) : AppColors.primary.withValues(alpha: 0.22),
+            width: 1.5,
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ---- 1. الهيدر الرسمي الفاخر ----
-                _buildHeader(context, isDark),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 40,
+              spreadRadius: 4,
+              offset: const Offset(0, 18),
+            ),
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.25),
+              blurRadius: 24,
+              spreadRadius: -4,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ---- 1. الهيدر الرسمي الفاخر ----
+              _buildHeader(context, isDark),
 
-                // ---- 2. المحتوى والتفاصيل المنظمة ----
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // كروت البيانات الأساسية (شبكية متوازنة 6 عناصر)
-                        _buildInfoGrid(context, isDark),
+              // ---- 2. المحتوى والتفاصيل المنظمة ----
+              Flexible(
+                child: SingleChildScrollView(
+                  padding:
+                      isPhone ? const EdgeInsets.fromLTRB(14, 14, 14, 16) : const EdgeInsets.fromLTRB(22, 18, 22, 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // كروت البيانات الأساسية (شبكية متوازنة 6 عناصر)
+                      _buildInfoGrid(context, isDark),
 
+                      const SizedBox(height: 16),
+
+                      // كروت الملاحظات وتغييرات الأسماء (إن وجدت)
+                      if (permit.notes.isNotEmpty ||
+                          permit.nameChangeNotes.isNotEmpty ||
+                          permit.namePerNewRegistry.isNotEmpty) ...[
+                        _buildNotesSection(context, isDark),
                         const SizedBox(height: 16),
-
-                        // كروت الملاحظات وتغييرات الأسماء (إن وجدت)
-                        if (permit.notes.isNotEmpty ||
-                            permit.nameChangeNotes.isNotEmpty ||
-                            permit.namePerNewRegistry.isNotEmpty) ...[
-                          _buildNotesSection(context, isDark),
-                          const SizedBox(height: 16),
-                        ],
-
-                        // سجل التدقيق وتاريخ التعديل
-                        _buildAuditSection(context, isDark),
-
-                        // قسم المرفقات والوثائق
-                        _buildAttachmentsSection(context, isDark),
                       ],
-                    ),
+
+                      // سجل التدقيق وتاريخ التعديل
+                      _buildAuditSection(context, isDark),
+
+                      // قسم المرفقات والوثائق
+                      _buildAttachmentsSection(context, isDark),
+                    ],
                   ),
                 ),
+              ),
 
-                // ---- 3. أزرار الإجراءات السفلية المطورة ----
-                _buildFooterActions(context, isDark),
-              ],
-            ),
+              // ---- 3. أزرار الإجراءات السفلية المطورة ----
+              SafeArea(top: false, child: _buildFooterActions(context, isDark, isPhone)),
+            ],
           ),
         ),
       ),
@@ -294,79 +312,89 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // باج رقم الإجازة والسنة
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.32)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.assignment_rounded, color: Colors.white, size: 16),
-                        const SizedBox(width: 6),
-                        Text(
-                          'إجازة رقم ${permit.permitYear} / ${permit.permitNumber}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13.5,
-                            fontFamily: 'Cairo',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Tooltip(
-                    message: 'عرض باركود الإجازة',
-                    child: InkWell(
-                      onTap: _showBarcodeDialog,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              // باج رقم الإجازة والسنة (يتقلص على الشاشات الضيقة بدل أن يُقص)
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
+                          color: Colors.white.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.32)),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.qr_code_2_rounded, color: Colors.white, size: 15),
-                            SizedBox(width: 4),
+                            const Icon(Icons.assignment_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 6),
                             Text(
-                              'باركود',
-                              style: TextStyle(color: Colors.white, fontSize: 11.5, fontFamily: 'Cairo', fontWeight: FontWeight.bold),
+                              'إجازة رقم ${permit.permitYear} / ${permit.permitNumber}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5,
+                                fontFamily: 'Cairo',
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Tooltip(
-                    message: 'نسخ بيانات الإجازة',
-                    child: InkWell(
-                      onTap: _copyPermitSummary,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: 'عرض باركود الإجازة',
+                        child: InkWell(
+                          onTap: _showBarcodeDialog,
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.qr_code_2_rounded, color: Colors.white, size: 15),
+                                SizedBox(width: 4),
+                                Text(
+                                  'باركود',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11.5,
+                                      fontFamily: 'Cairo',
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        child: const Icon(Icons.copy_rounded, color: Colors.white, size: 14),
                       ),
-                    ),
+                      const SizedBox(width: 6),
+                      Tooltip(
+                        message: 'نسخ بيانات الإجازة',
+                        child: InkWell(
+                          onTap: _copyPermitSummary,
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.14),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                            ),
+                            child: const Icon(Icons.copy_rounded, color: Colors.white, size: 14),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
 
               // زر الإغلاق X
@@ -407,9 +435,11 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
                   children: [
                     Text(
                       permit.fullName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 20,
+                        fontSize: 19,
                         fontWeight: FontWeight.w800,
                         fontFamily: 'Cairo',
                         height: 1.2,
@@ -420,12 +450,16 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
                       children: [
                         const Icon(Icons.verified_rounded, color: Color(0xFF4ADE80), size: 14),
                         const SizedBox(width: 5),
-                        Text(
-                          'مديرية بلدية الهاشمية · وثيقة إجازة رسمية مسجلة',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.78),
-                            fontSize: 11.5,
-                            fontFamily: 'Cairo',
+                        Flexible(
+                          child: Text(
+                            'مديرية بلدية الهاشمية · وثيقة إجازة رسمية مسجلة',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.78),
+                              fontSize: 11.5,
+                              fontFamily: 'Cairo',
+                            ),
                           ),
                         ),
                       ],
@@ -443,12 +477,12 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
   Widget _buildInfoGrid(BuildContext context, bool isDark) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth > 380;
-        final tileWidth = isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth;
+        final twoCols = constraints.maxWidth >= 280;
+        final tileWidth = twoCols ? (constraints.maxWidth - 10) / 2 : constraints.maxWidth;
 
         return Wrap(
-          spacing: 12,
-          runSpacing: 12,
+          spacing: 10,
+          runSpacing: 10,
           children: [
             _infoTile(
               context,
@@ -480,7 +514,7 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
                 context,
                 icon: Icons.square_foot_rounded,
                 label: context.tr('plot_area'),
-                value: '${permit.plotArea} م²',
+                value: '${_area(permit.plotArea!)} م²',
                 color: AppColors.accent,
                 width: tileWidth,
               ),
@@ -489,7 +523,7 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
                 context,
                 icon: Icons.domain_rounded,
                 label: context.tr('building_area'),
-                value: '${permit.buildingArea} م²',
+                value: '${_area(permit.buildingArea!)} م²',
                 color: AppColors.secondary,
                 width: tileWidth,
               ),
@@ -508,9 +542,10 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
     required double width,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final compact = width < 200;
     return Container(
       width: width,
-      padding: const EdgeInsets.all(13),
+      padding: EdgeInsets.all(compact ? 10 : 13),
       decoration: BoxDecoration(
         color: isDark ? color.withValues(alpha: 0.12) : color.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(16),
@@ -519,14 +554,14 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(compact ? 7 : 10),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: color, size: 22),
+            child: Icon(icon, color: color, size: compact ? 18 : 22),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: compact ? 8 : 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -700,9 +735,11 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
     );
   }
 
-  Widget _buildFooterActions(BuildContext context, bool isDark) {
+  Widget _buildFooterActions(BuildContext context, bool isDark, bool isPhone) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: isPhone
+          ? const EdgeInsets.fromLTRB(14, 10, 14, 10)
+          : const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
         border: Border(
@@ -711,8 +748,8 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
           ),
         ),
       ),
-      child: Row(
-        children: [
+      child: _responsiveActions(
+        [
           // زر تعديل الإجازة أو زر حسناً
           Expanded(
             child: widget.canEdit
@@ -869,6 +906,37 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// أزرار التذييل: صف واحد على الشاشات العريضة، وشبكة 2×2 على الهاتف
+  /// (بدل تصغير النصوص حتى تصبح غير مقروءة).
+  Widget _responsiveActions(List<Widget> items) {
+    final buttons = items.whereType<Expanded>().map((e) => e.child).toList();
+    return LayoutBuilder(
+      builder: (context, c) {
+        if (c.maxWidth >= 560 || buttons.length < 4) {
+          return Row(
+            children: [
+              for (var i = 0; i < buttons.length; i++) ...[
+                if (i > 0) const SizedBox(width: 10),
+                Expanded(child: buttons[i]),
+              ],
+            ],
+          );
+        }
+        Widget pair(Widget a, Widget b) => Row(
+              children: [Expanded(child: a), const SizedBox(width: 10), Expanded(child: b)],
+            );
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            pair(buttons[0], buttons[1]),
+            const SizedBox(height: 10),
+            pair(buttons[2], buttons[3]),
+          ],
+        );
+      },
     );
   }
 

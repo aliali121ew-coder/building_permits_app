@@ -20,10 +20,17 @@ class PermitProvider extends ChangeNotifier {
 
   RemoteChangeEvent? lastRemoteChange;
 
+  Timer? _refreshDebounce;
+
   void init() {
+    if (_dataSub != null) return; // مرة واحدة فقط مهما تكرر فتح الشاشة الرئيسية
     _refresh();
     _sync.start();
-    _dataSub = _sync.dataChangedStream.listen((_) => _refresh());
+    // دمج إشعارات التغيير المتتالية في إعادة بناء واحدة (سلاسة بدون تقطيع)
+    _dataSub = _sync.dataChangedStream.listen((_) {
+      _refreshDebounce?.cancel();
+      _refreshDebounce = Timer(const Duration(milliseconds: 80), _refresh);
+    });
     _statusSub = _sync.statusStream.listen((s) {
       _syncStatus = s;
       notifyListeners();
@@ -77,8 +84,6 @@ class PermitProvider extends ChangeNotifier {
 
   List<int> get availableYears {
     if (_availableYearsCache.isNotEmpty) return _availableYearsCache;
-    final yearsFromSync = _sync.getAvailableYears();
-    if (yearsFromSync.isNotEmpty) return yearsFromSync;
     final now = DateTime.now().year;
     return [now, now - 1, now - 2, now - 3, now - 4, now - 5];
   }
@@ -87,7 +92,13 @@ class PermitProvider extends ChangeNotifier {
 
   int getYearCount(int year) => _yearCounts[year] ?? 0;
 
-  int suggestNextNumber(int year) => _sync.suggestNextPermitNumber(year);
+  int suggestNextNumber(int year) {
+    var maxNumber = 0;
+    for (final p in byYear(year)) {
+      if (p.permitNumber > maxNumber) maxNumber = p.permitNumber;
+    }
+    return maxNumber + 1;
+  }
 
   int get totalCount => _permits.length;
 
@@ -183,9 +194,7 @@ class PermitProvider extends ChangeNotifier {
       updatedByName: actorName,
       updatedAt: now,
     );
-    final saved = await _sync.addPermit(permit);
-    _refresh();
-    return saved;
+    return _sync.addPermit(permit);
   }
 
   Future<void> updatePermit(PermitModel existing, {
@@ -222,24 +231,17 @@ class PermitProvider extends ChangeNotifier {
       updatedAt: DateTime.now().toUtc(),
     );
     await _sync.updatePermitData(updated);
-    _refresh();
   }
 
   Future<void> deletePermit(PermitModel permit, {required String actorId, required String actorName}) async {
     await _sync.softDeletePermit(permit, actorId: actorId, actorName: actorName);
-    _refresh();
   }
 
-  Future<void> forceSync() => _sync.forceFullSync();
-
-  /// تحديث كامل: مسح النسخة المحلية وإعادة السحب من الخادم، ثم إعادة بناء القوائم.
-  Future<void> fullRefresh() async {
-    await _sync.fullRefreshFromServer();
-    _refresh();
-  }
+  Future<void> forceSync() => _sync.syncNow();
 
   @override
   void dispose() {
+    _refreshDebounce?.cancel();
     _dataSub?.cancel();
     _statusSub?.cancel();
     _remoteSub?.cancel();

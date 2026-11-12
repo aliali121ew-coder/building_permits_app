@@ -204,7 +204,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ],
                             image: _localAvatarPath != null
                                 ? DecorationImage(
-                                    image: FileImage(File(_localAvatarPath!)),
+                                    image: _localAvatarPath!.startsWith('http')
+                                        ? NetworkImage(_localAvatarPath!)
+                                        : FileImage(File(_localAvatarPath!)) as ImageProvider,
                                     fit: BoxFit.cover,
                                   )
                                 : null,

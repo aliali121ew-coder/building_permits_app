@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// نظام ترجمة مبسّط (عربي/إنجليزي) لا يعتمد على أدوات التوليد (flutter gen-l10n)
-/// لتفادي أي تعقيد إضافي عند بناء المشروع لأول مرة.
+/// نصوص الواجهة (التطبيق عربي بالكامل).
 /// الاستخدام: context.tr('home_title')
 class AppStrings {
   AppStrings._();
@@ -74,79 +73,9 @@ class AppStrings {
       'view_details': 'عرض التفاصيل',
       'audit_log': 'سجل التدقيق',
     },
-    'en': {
-      'app_name': 'Building Permits',
-      'welcome_title': 'Welcome',
-      'welcome_subtitle': 'Enterprise Building Permits Management System',
-      'welcome_get_started': 'Get Started',
-      'login_title': 'Sign In',
-      'email': 'Email',
-      'password': 'Password',
-      'login_button': 'Sign In',
-      'home_title': 'Home',
-      'total_permits': 'Total Permits',
-      'this_year': 'Permits This Year',
-      'this_month': 'Permits This Month',
-      'search': 'Search',
-      'add_permit': 'Add Permit',
-      'edit_permit': 'Edit Permit',
-      'all_permits': 'All Permits',
-      'settings': 'Settings',
-      'sync_status': 'Sync Status',
-      'synced': 'Synced',
-      'syncing': 'Syncing...',
-      'offline': 'Offline',
-      'sync_error': 'Sync Error',
-      'permit_number': 'Permit No.',
-      'full_name': 'Full Name',
-      'plot_number': 'Plot No.',
-      'permit_date': 'Date',
-      'notes': 'Notes',
-      'permit_type': 'Permit Type',
-      'permit_year': 'Year',
-      'plot_area': 'Plot Area',
-      'building_area': 'Building Area',
-      'name_change_notes': 'Changes (Name Change)',
-      'name_per_new_registry': 'Name per New Registry',
-      'save': 'Save',
-      'cancel': 'Cancel',
-      'delete': 'Delete',
-      'edit': 'Edit',
-      'required_field': 'This field is required',
-      'confirm_delete': 'Confirm Delete',
-      'confirm_delete_msg': 'Are you sure you want to delete this permit?',
-      'saved_successfully': 'Saved successfully',
-      'deleted_successfully': 'Deleted successfully',
-      'logout': 'Logout',
-      'dark_mode': 'Dark Mode',
-      'language': 'Language',
-      'export_pdf': 'Export PDF',
-      'export_excel': 'Export Excel',
-      'print': 'Print',
-      'no_results': 'No results found',
-      'advanced_filters': 'Advanced Filters',
-      'from_date': 'From Date',
-      'to_date': 'To Date',
-      'apply': 'Apply',
-      'clear_filters': 'Clear Filters',
-      'attachments': 'Attachments',
-      'add_attachment': 'Add Attachment',
-      'user_management': 'User Management',
-      'admin': 'Admin',
-      'employee': 'Employee',
-      'active': 'Active',
-      'inactive': 'Inactive',
-      'permit_number_duplicate': 'This permit number is already used for this year',
-      'changed_by': 'Changed by',
-      'view_details': 'View Details',
-      'audit_log': 'Audit Log',
-    },
   };
 
-  static String of(BuildContext context, String key) {
-    final code = Localizations.maybeLocaleOf(context)?.languageCode ?? 'ar';
-    return _values[code]?[key] ?? _values['ar']![key] ?? key;
-  }
+  static String of(BuildContext context, String key) => _values['ar']![key] ?? key;
 }
 
 extension AppStringsX on BuildContext {

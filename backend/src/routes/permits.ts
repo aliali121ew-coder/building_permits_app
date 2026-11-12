@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { Env, Permit, UserPayload } from '../types';
 import { adminOnlyMiddleware, authMiddleware } from '../middleware/auth';
+import { activeLock } from '../utils/activity';
 
 const permits = new Hono<{ Bindings: Env; Variables: { user: UserPayload } }>();
 
@@ -26,16 +27,34 @@ export function formatPermit(row: any) {
   };
 }
 
-async function canUserWrite(db: D1Database, userId: string, role: string): Promise<boolean> {
-  if (role === 'admin') return true;
-  const profile = await db.prepare(
-    'SELECT is_active, approval_status, license_paused, license_end_at FROM profiles WHERE id = ?'
-  ).bind(userId).first<{ is_active: number; approval_status: string; license_paused: number; license_end_at: string | null }>();
+type Writer = { allowed: boolean; name: string };
 
-  if (!profile) return false;
-  if (profile.is_active !== 1 || profile.approval_status !== 'approved' || profile.license_paused === 1) return false;
-  if (!profile.license_end_at) return false;
-  return new Date(profile.license_end_at).getTime() > Date.now();
+/**
+ * قراءة واحدة فقط من D1 لكل عملية كتابة: صلاحية الكتابة + اسم المستخدم معاً
+ * (سابقاً استعلامان منفصلان).
+ */
+async function getWriter(db: D1Database, user: UserPayload): Promise<Writer> {
+  const p = await db.prepare(
+    'SELECT full_name, is_active, approval_status, license_paused, license_end_at, locked_until FROM profiles WHERE id = ?'
+  ).bind(user.id).first<{ full_name: string; is_active: number; approval_status: string; license_paused: number; license_end_at: string | null; locked_until: string | null }>();
+
+  const name = p?.full_name || 'مستخدم';
+  if (user.role === 'admin') return { allowed: true, name };
+  if (!p || p.is_active !== 1 || p.approval_status !== 'approved' || p.license_paused === 1 || !p.license_end_at || activeLock(p.locked_until)) {
+    return { allowed: false, name };
+  }
+  return { allowed: new Date(p.license_end_at).getTime() > Date.now(), name };
+}
+
+function auditStmt(db: D1Database, permitId: string, action: string, user: UserPayload, name: string, nowIso: string, oldData: unknown, newData: unknown) {
+  return db.prepare(`
+    INSERT INTO permits_audit_log (id, permit_id, action, changed_by, changed_by_name, changed_at, old_data, new_data)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(), permitId, action, user.id, name, nowIso,
+    oldData == null ? null : JSON.stringify(oldData),
+    newData == null ? null : JSON.stringify(newData),
+  );
 }
 
 // 1) جلب قائمة الإجازات (مع دعم since للمزامنة التفاضلية والبحث والسنة)
@@ -64,7 +83,8 @@ permits.get('/', async (c) => {
     params.push(`%${search}%`, `%${search}%`);
   }
 
-  query += ' ORDER BY permit_year DESC, permit_number ASC';
+  // الترتيب مطلوب للتحميل الكامل فقط؛ السحب التفاضلي يمر عبر فهرس updated_at
+  if (!since) query += ' ORDER BY permit_year DESC, permit_number ASC';
 
   const { results } = await c.env.DB.prepare(query).bind(...params).all<Permit>();
   return c.json(results.map(formatPermit));
@@ -91,177 +111,120 @@ permits.get('/:id', async (c) => {
   return c.json(formatPermit(permit));
 });
 
-// 4) إضافة إجازة بناء جديدة (Insert)
+// 4) إضافة إجازة بناء جديدة — قراءة واحدة + دفعة كتابة واحدة (الإدراج + سجل التدقيق) مع RETURNING
 permits.post('/', async (c) => {
   const user = c.get('user');
-  const allowed = await canUserWrite(c.env.DB, user.id, user.role);
-  if (!allowed) {
+  const writer = await getWriter(c.env.DB, user);
+  if (!writer.allowed) {
     return c.json({ error: 'حسابك غير مصرح له بالإضافة (الترخيص غير ساري أو معلق)' }, 403);
   }
 
   const data = await c.req.json();
   const id = data.id || crypto.randomUUID();
-  const permitNumber = parseInt(String(data.permit_number ?? 0), 10);
-  const permitYear = parseInt(String(data.permit_year ?? new Date().getFullYear()), 10);
-  const attachmentUrls = JSON.stringify(data.attachment_urls || []);
   const nowIso = new Date().toISOString();
 
-  const profile = await c.env.DB.prepare('SELECT full_name FROM profiles WHERE id = ?').bind(user.id).first<{ full_name: string }>();
+  const [inserted] = await c.env.DB.batch<Permit>([
+    c.env.DB.prepare(`
+      INSERT INTO permits (
+        id, permit_number, permit_year, full_name, plot_number, permit_date,
+        notes, permit_type, name_change_notes, plot_area, building_area,
+        name_per_new_registry, attachment_urls, is_deleted, duplicate_flag,
+        created_by, created_at, updated_by, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *
+    `).bind(
+      id,
+      parseInt(String(data.permit_number ?? 0), 10),
+      parseInt(String(data.permit_year ?? new Date().getFullYear()), 10),
+      data.full_name || '',
+      data.plot_number || '',
+      data.permit_date || nowIso.split('T')[0],
+      data.notes ?? null,
+      data.permit_type ?? null,
+      data.name_change_notes ?? null,
+      data.plot_area ?? null,
+      data.building_area ?? null,
+      data.name_per_new_registry ?? null,
+      JSON.stringify(data.attachment_urls || []),
+      data.is_deleted ? 1 : 0,
+      data.duplicate_flag ? 1 : 0,
+      user.id, nowIso, user.id, nowIso,
+    ),
+    auditStmt(c.env.DB, id, 'insert', user, writer.name, nowIso, null, data),
+  ]);
 
-  await c.env.DB.prepare(`
-    INSERT INTO permits (
-      id, permit_number, permit_year, full_name, plot_number, permit_date,
-      notes, permit_type, name_change_notes, plot_area, building_area,
-      name_per_new_registry, attachment_urls, is_deleted, duplicate_flag,
-      created_by, created_at, updated_by, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    id,
-    permitNumber,
-    permitYear,
-    data.full_name || '',
-    data.plot_number || '',
-    data.permit_date || nowIso.split('T')[0],
-    data.notes ?? null,
-    data.permit_type ?? null,
-    data.name_change_notes ?? null,
-    data.plot_area ?? null,
-    data.building_area ?? null,
-    data.name_per_new_registry ?? null,
-    attachmentUrls,
-    data.is_deleted ? 1 : 0,
-    data.duplicate_flag ? 1 : 0,
-    user.id,
-    nowIso,
-    user.id,
-    nowIso
-  ).run();
-
-  await c.env.DB.prepare(`
-    INSERT INTO permits_audit_log (id, permit_id, action, changed_by, changed_by_name, changed_at, new_data)
-    VALUES (?, ?, 'insert', ?, ?, ?, ?)
-  `).bind(
-    crypto.randomUUID(),
-    id,
-    user.id,
-    profile?.full_name || 'مستخدم',
-    nowIso,
-    JSON.stringify(data)
-  ).run();
-
-  const created = await c.env.DB.prepare('SELECT * FROM permits WHERE id = ?').bind(id).first<Permit>();
-  return c.json(formatPermit(created), 201);
+  return c.json(formatPermit(inserted.results[0]), 201);
 });
 
-// 5) تعديل إجازة بناء (Update - يدعم التحديث الكلي أو الجزئي مثل الحذف المنطقي)
+// 5) تعديل إجازة (كلي أو جزئي مثل الحذف المنطقي) — قراءتان + دفعة كتابة واحدة مع RETURNING
 permits.put('/:id', async (c) => {
   const user = c.get('user');
-  const allowed = await canUserWrite(c.env.DB, user.id, user.role);
-  if (!allowed) {
+  const writer = await getWriter(c.env.DB, user);
+  if (!writer.allowed) {
     return c.json({ error: 'حسابك غير مصرح له بالتعديل' }, 403);
   }
 
   const id = c.req.param('id');
-  const oldPermit = await c.env.DB.prepare('SELECT * FROM permits WHERE id = ?').bind(id).first<Permit>();
-  if (!oldPermit) return c.json({ error: 'الإجازة غير موجودة' }, 404);
+  const old = await c.env.DB.prepare('SELECT * FROM permits WHERE id = ?').bind(id).first<Permit>();
+  if (!old) return c.json({ error: 'الإجازة غير موجودة' }, 404);
 
   const data = await c.req.json();
   const nowIso = new Date().toISOString();
-  const profile = await c.env.DB.prepare('SELECT full_name FROM profiles WHERE id = ?').bind(user.id).first<{ full_name: string }>();
+  const pick = <T,>(key: string, fallback: T): T => (data[key] !== undefined ? data[key] : fallback);
 
-  const permitNumber = data.permit_number !== undefined ? parseInt(String(data.permit_number), 10) : oldPermit.permit_number;
-  const permitYear = data.permit_year !== undefined ? parseInt(String(data.permit_year), 10) : oldPermit.permit_year;
-  const fullName = data.full_name !== undefined ? data.full_name : oldPermit.full_name;
-  const plotNumber = data.plot_number !== undefined ? data.plot_number : oldPermit.plot_number;
-  const permitDate = data.permit_date !== undefined ? data.permit_date : oldPermit.permit_date;
-  const notes = data.notes !== undefined ? data.notes : oldPermit.notes;
-  const permitType = data.permit_type !== undefined ? data.permit_type : oldPermit.permit_type;
-  const nameChangeNotes = data.name_change_notes !== undefined ? data.name_change_notes : oldPermit.name_change_notes;
-  const plotArea = data.plot_area !== undefined ? data.plot_area : oldPermit.plot_area;
-  const buildingArea = data.building_area !== undefined ? data.building_area : oldPermit.building_area;
-  const namePerNewRegistry = data.name_per_new_registry !== undefined ? data.name_per_new_registry : oldPermit.name_per_new_registry;
-  const attachmentUrls = data.attachment_urls !== undefined ? JSON.stringify(data.attachment_urls) : oldPermit.attachment_urls;
-  const isDeleted = data.is_deleted !== undefined ? (data.is_deleted ? 1 : 0) : oldPermit.is_deleted;
-  const duplicateFlag = data.duplicate_flag !== undefined ? (data.duplicate_flag ? 1 : 0) : oldPermit.duplicate_flag;
+  const isDeleted = data.is_deleted !== undefined ? (data.is_deleted ? 1 : 0) : old.is_deleted;
+  const action = isDeleted === 1 && old.is_deleted === 0 ? 'delete'
+    : isDeleted === 0 && old.is_deleted === 1 ? 'restore' : 'update';
 
-  await c.env.DB.prepare(`
-    UPDATE permits SET
-      permit_number = ?, permit_year = ?, full_name = ?, plot_number = ?, permit_date = ?,
-      notes = ?, permit_type = ?, name_change_notes = ?, plot_area = ?, building_area = ?,
-      name_per_new_registry = ?, attachment_urls = ?, is_deleted = ?, duplicate_flag = ?,
-      updated_by = ?, updated_at = ?
-    WHERE id = ?
-  `).bind(
-    permitNumber,
-    permitYear,
-    fullName,
-    plotNumber,
-    permitDate,
-    notes,
-    permitType,
-    nameChangeNotes,
-    plotArea,
-    buildingArea,
-    namePerNewRegistry,
-    attachmentUrls,
-    isDeleted,
-    duplicateFlag,
-    user.id,
-    nowIso,
-    id
-  ).run();
+  const [updated] = await c.env.DB.batch<Permit>([
+    c.env.DB.prepare(`
+      UPDATE permits SET
+        permit_number = ?, permit_year = ?, full_name = ?, plot_number = ?, permit_date = ?,
+        notes = ?, permit_type = ?, name_change_notes = ?, plot_area = ?, building_area = ?,
+        name_per_new_registry = ?, attachment_urls = ?, is_deleted = ?, duplicate_flag = ?,
+        updated_by = ?, updated_at = ?
+      WHERE id = ?
+      RETURNING *
+    `).bind(
+      data.permit_number !== undefined ? parseInt(String(data.permit_number), 10) : old.permit_number,
+      data.permit_year !== undefined ? parseInt(String(data.permit_year), 10) : old.permit_year,
+      pick('full_name', old.full_name),
+      pick('plot_number', old.plot_number),
+      pick('permit_date', old.permit_date),
+      pick('notes', old.notes),
+      pick('permit_type', old.permit_type),
+      pick('name_change_notes', old.name_change_notes),
+      pick('plot_area', old.plot_area),
+      pick('building_area', old.building_area),
+      pick('name_per_new_registry', old.name_per_new_registry),
+      data.attachment_urls !== undefined ? JSON.stringify(data.attachment_urls) : old.attachment_urls,
+      isDeleted,
+      data.duplicate_flag !== undefined ? (data.duplicate_flag ? 1 : 0) : old.duplicate_flag,
+      user.id, nowIso, id,
+    ),
+    auditStmt(c.env.DB, id, action, user, writer.name, nowIso, old, data),
+  ]);
 
-  const action = isDeleted === 1 && oldPermit.is_deleted === 0 ? 'delete'
-    : isDeleted === 0 && oldPermit.is_deleted === 1 ? 'restore' : 'update';
-
-  await c.env.DB.prepare(`
-    INSERT INTO permits_audit_log (id, permit_id, action, changed_by, changed_by_name, changed_at, old_data, new_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    crypto.randomUUID(),
-    id,
-    action,
-    user.id,
-    profile?.full_name || 'مستخدم',
-    nowIso,
-    JSON.stringify(oldPermit),
-    JSON.stringify(data)
-  ).run();
-
-  const updated = await c.env.DB.prepare('SELECT * FROM permits WHERE id = ?').bind(id).first<Permit>();
-  return c.json(formatPermit(updated));
+  return c.json(formatPermit(updated.results[0]));
 });
 
 // 6) حذف منطقي (Soft Delete)
 permits.delete('/:id', async (c) => {
   const user = c.get('user');
-  const allowed = await canUserWrite(c.env.DB, user.id, user.role);
-  if (!allowed) {
+  const writer = await getWriter(c.env.DB, user);
+  if (!writer.allowed) {
     return c.json({ error: 'حسابك غير مصرح له بالحذف' }, 403);
   }
 
   const id = c.req.param('id');
-  const oldPermit = await c.env.DB.prepare('SELECT * FROM permits WHERE id = ?').bind(id).first<Permit>();
-  if (!oldPermit) return c.json({ error: 'الإجازة غير موجودة' }, 404);
+  const old = await c.env.DB.prepare('SELECT * FROM permits WHERE id = ?').bind(id).first<Permit>();
+  if (!old) return c.json({ error: 'الإجازة غير موجودة' }, 404);
 
   const nowIso = new Date().toISOString();
-  const profile = await c.env.DB.prepare('SELECT full_name FROM profiles WHERE id = ?').bind(user.id).first<{ full_name: string }>();
-
-  await c.env.DB.prepare(`
-    UPDATE permits SET is_deleted = 1, updated_by = ?, updated_at = ? WHERE id = ?
-  `).bind(user.id, nowIso, id).run();
-
-  await c.env.DB.prepare(`
-    INSERT INTO permits_audit_log (id, permit_id, action, changed_by, changed_by_name, changed_at, old_data)
-    VALUES (?, ?, 'delete', ?, ?, ?, ?)
-  `).bind(
-    crypto.randomUUID(),
-    id,
-    user.id,
-    profile?.full_name || 'مستخدم',
-    nowIso,
-    JSON.stringify(oldPermit)
-  ).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE permits SET is_deleted = 1, updated_by = ?, updated_at = ? WHERE id = ?').bind(user.id, nowIso, id),
+    auditStmt(c.env.DB, id, 'delete', user, writer.name, nowIso, old, null),
+  ]);
 
   return c.json({ message: 'تم حذف الإجازة بنجاح' });
 });

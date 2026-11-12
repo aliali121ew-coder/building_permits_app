@@ -1,23 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/constants/app_colors.dart';
 import '../../l10n/app_strings.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/locale_provider.dart';
-import '../../providers/permit_provider.dart';
 import '../../providers/theme_provider.dart';
-import '../../widgets/update_dialog.dart';
+import '../../services/cloudflare_api_service.dart';
+import '../../widgets/admin_gate.dart';
+import '../../widgets/app_update_gate.dart';
+import '../../widgets/password_dialogs.dart';
+import '../../widgets/user_avatar.dart';
+import '../admin/activity_log_screen.dart';
+import '../admin/licensing_screen.dart';
+import '../admin/pending_accounts_screen.dart';
 import '../admin/user_management_screen.dart';
 import '../auth/login_screen.dart';
+import 'profile_screen.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  int _pending = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPendingCount();
+  }
+
+  /// عدد طلبات الحسابات الجديدة (للمدير فقط، قراءة واحدة عند فتح الإعدادات)
+  Future<void> _loadPendingCount() async {
+    if (!(context.read<AuthProvider>().isAdmin)) return;
+    final n = await CloudflareApiService.instance.fetchPendingCount();
+    if (mounted) setState(() => _pending = n);
+  }
+
+  Future<void> _openAdmin(Widget screen) async {
+    await openAdminScreen(context, screen);
+    _loadPendingCount();
+  }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final user = auth.user;
     final themeProvider = context.watch<ThemeProvider>();
-    final localeProvider = context.watch<LocaleProvider>();
 
     return Scaffold(
       appBar: AppBar(title: Text(context.tr('settings'))),
@@ -26,12 +58,11 @@ class SettingsScreen extends StatelessWidget {
         children: [
           Card(
             child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: AppColors.primary.withValues(alpha: 0.12),
-                child: const Icon(Icons.person_rounded, color: AppColors.primary),
-              ),
-              title: Text(auth.user?.fullName ?? ''),
+              leading: UserAvatar(path: user?.avatarPath, name: user?.fullName ?? ''),
+              title: Text(user?.fullName ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text(auth.isAdmin ? context.tr('admin') : context.tr('employee')),
+              trailing: const Icon(Icons.edit_rounded, size: 18),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen())),
             ),
           ),
           Card(
@@ -39,25 +70,40 @@ class SettingsScreen extends StatelessWidget {
               leading: const Icon(Icons.lock_rounded, color: AppColors.primary),
               title: const Text('تغيير كلمة المرور', style: TextStyle(fontWeight: FontWeight.w600)),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-              onTap: () => _showChangePasswordDialog(context),
+              onTap: () => showChangePasswordDialog(context),
             ),
           ),
           if (auth.isAdmin) ...[
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.security_rounded, color: AppColors.accent),
-                title: const Text('إدارة صلاحيات المستخدمين والموظفين', style: TextStyle(fontWeight: FontWeight.w600)),
-                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const UserManagementScreen()),
-                  );
-                },
-              ),
+            const _SectionTitle('إدارة النظام'),
+            _AdminTile(
+              icon: Icons.how_to_reg_rounded,
+              color: AppColors.info,
+              title: 'طلبات الحسابات الجديدة',
+              badge: _pending,
+              onTap: () => _openAdmin(const PendingAccountsScreen()),
+            ),
+            _AdminTile(
+              icon: Icons.manage_accounts_rounded,
+              color: AppColors.accent,
+              title: 'المستخدمون والصلاحيات',
+              subtitle: 'الصلاحيات، كلمة المرور، الإيقاف والقفل',
+              onTap: () => _openAdmin(const UserManagementScreen()),
+            ),
+            _AdminTile(
+              icon: Icons.verified_user_rounded,
+              color: AppColors.secondary,
+              title: 'التراخيص والأجهزة',
+              onTap: () => _openAdmin(const LicensingScreen()),
+            ),
+            _AdminTile(
+              icon: Icons.history_rounded,
+              color: Colors.orange,
+              title: 'سجل النشاط',
+              subtitle: 'كل تسجيل وتعديل من جميع الموظفين',
+              onTap: () => _openAdmin(const ActivityLogScreen()),
             ),
           ],
-          const SizedBox(height: 12),
+          const _SectionTitle('التطبيق'),
           Card(
             child: SwitchListTile(
               secondary: const Icon(Icons.dark_mode_rounded),
@@ -66,39 +112,21 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (_) => themeProvider.toggle(context),
             ),
           ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.language_rounded),
-              title: Text(context.tr('language')),
-              trailing: Text(localeProvider.locale.languageCode == 'ar' ? 'العربية' : 'English'),
-              onTap: () => localeProvider.toggle(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.cloud_sync_rounded, color: AppColors.info),
-              title: const Text('تحديث كامل من الخادم', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text(
-                'يمسح النسخة المحلية ويعيد تنزيل كل الإجازات من الخادم (يحل مشكلة البيانات القديمة أو المكررة)',
-                style: TextStyle(fontSize: 11),
-              ),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-              onTap: () => _showFullRefreshDialog(context),
-            ),
-          ),
-          const SizedBox(height: 12),
           Card(
             child: ListTile(
               leading: const Icon(Icons.system_update_rounded, color: AppColors.info),
               title: const Text('التحقق من وجود تحديث', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text(
-                'يفحص أحدث إصدار من التطبيق وينزّله ويثبّته إن وُجد',
-                style: TextStyle(fontSize: 11),
-              ),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-              onTap: () => checkAndPromptUpdate(context, silent: false),
+              onTap: () async {
+                final found = await AppUpdateGate.checkNow();
+                if (!found && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('التطبيق محدّث لآخر إصدار', style: TextStyle(fontFamily: 'Cairo')),
+                    backgroundColor: AppColors.secondary,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              },
             ),
           ),
           const SizedBox(height: 24),
@@ -120,345 +148,58 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _showChangePasswordDialog(BuildContext context) {
-    final auth = context.read<AuthProvider>();
-    
-    final passwordCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-    
-    bool obscurePassword = true;
-    bool obscureConfirm = true;
-    
-    bool hasLength = false;
-    bool hasUpper = false;
-    bool hasLower = false;
-    bool hasDigit = false;
-    bool hasSpecial = false;
-    String passwordStrength = '';
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            
-            void updatePasswordStrength(String password) {
-              if (password.isEmpty) {
-                setDialogState(() {
-                  hasLength = false;
-                  hasUpper = false;
-                  hasLower = false;
-                  hasDigit = false;
-                  hasSpecial = false;
-                  passwordStrength = '';
-                });
-                return;
-              }
-              setDialogState(() {
-                hasLength = password.length >= 8;
-                hasUpper = RegExp(r'[A-Z]').hasMatch(password);
-                hasLower = RegExp(r'[a-z]').hasMatch(password);
-                hasDigit = RegExp(r'[0-9]').hasMatch(password);
-                hasSpecial = RegExp(r'[!@#\$%^&*()_,\.?":{}|<>\-]').hasMatch(password);
-                
-                int score = 0;
-                if (hasLength) score++;
-                if (hasUpper) score++;
-                if (hasLower) score++;
-                if (hasDigit) score++;
-                if (hasSpecial) score++;
-                
-                if (score <= 2) {
-                  passwordStrength = 'weak';
-                } else if (score <= 4) {
-                  passwordStrength = 'medium';
-                } else {
-                  passwordStrength = 'strong';
-                }
-              });
-            }
-            
-            Color strengthColor = Colors.grey;
-            String strengthLabel = '';
-            int dotsCount = 0;
-            if (passwordStrength.isNotEmpty) {
-              switch (passwordStrength) {
-                case 'weak':
-                  strengthColor = AppColors.danger;
-                  strengthLabel = 'ضعيفة';
-                  dotsCount = 1;
-                  break;
-                case 'medium':
-                  strengthColor = Colors.orange;
-                  strengthLabel = 'متوسطة';
-                  dotsCount = 2;
-                  break;
-                case 'strong':
-                  strengthColor = AppColors.secondary;
-                  strengthLabel = 'قوية جداً';
-                  dotsCount = 3;
-                  break;
-              }
-            }
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+  final String text;
 
-            Widget requirementItem(String text, bool met) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
-                  children: [
-                    Icon(
-                      met ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                      color: met ? AppColors.secondary : AppColors.danger,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      text,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontFamily: 'Cairo',
-                        color: met ? AppColors.secondary : Colors.grey,
-                        fontWeight: met ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 18, 8, 6),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: Colors.grey)),
+      );
+}
 
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              title: const Row(
-                children: [
-                  Icon(Icons.lock_reset_rounded, color: AppColors.primary, size: 28),
-                  SizedBox(width: 10),
-                  Text(
-                    'تغيير كلمة المرور',
-                    style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                ],
+class _AdminTile extends StatelessWidget {
+  const _AdminTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+    this.badge = 0,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String? subtitle;
+  final int badge;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: Icon(icon, color: color),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: subtitle == null ? null : Text(subtitle!, style: const TextStyle(fontSize: 11.5)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (badge > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(12)),
+                child: Text('$badge',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
               ),
-              content: SingleChildScrollView(
-                child: Container(
-                  constraints: const BoxConstraints(maxWidth: 360),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text(
-                        'يرجى إدخال كلمة مرور جديدة مستوفية لشروط الأمان الموضحة أدناه.',
-                        style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: Colors.grey, height: 1.5),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: passwordCtrl,
-                        obscureText: obscurePassword,
-                        obscuringCharacter: '●',
-                        onChanged: updatePasswordStrength,
-                        decoration: InputDecoration(
-                          labelText: 'كلمة المرور الجديدة',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.primary),
-                          suffixIcon: IconButton(
-                            icon: Icon(obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
-                            onPressed: () => setDialogState(() => obscurePassword = !obscurePassword),
-                          ),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
-                      ),
-                      
-                      // مؤشر القوة وقائمة الشروط
-                      if (passwordStrength.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: strengthColor.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: strengthColor.withValues(alpha: 0.15), width: 1),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Text('قوة كلمة المرور: ', style: TextStyle(fontSize: 11, fontFamily: 'Cairo')),
-                                  Text(
-                                    strengthLabel,
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: strengthColor, fontFamily: 'Cairo'),
-                                  ),
-                                  const Spacer(),
-                                  Row(
-                                    children: List.generate(3, (index) {
-                                      final isActive = index < dotsCount;
-                                      return Container(
-                                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                                        width: 8,
-                                        height: 8,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: isActive ? strengthColor : Colors.grey.withValues(alpha: 0.3),
-                                        ),
-                                      );
-                                    }),
-                                  ),
-                                ],
-                              ),
-                              const Divider(height: 12),
-                              requirementItem('طول كلمة المرور 8 رموز فما فوق', hasLength),
-                              requirementItem('أحرف كبيرة (A-Z) على الأقل', hasUpper),
-                              requirementItem('أحرف صغيرة (a-z) على الأقل', hasLower),
-                              requirementItem('أرقام (0-9) على الأقل', hasDigit),
-                              requirementItem('رموز خاصة (مثل !@#\$%^&*()_) على الأقل', hasSpecial),
-                            ],
-                          ),
-                        ),
-                      ],
-                      
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: confirmCtrl,
-                        obscureText: obscureConfirm,
-                        obscuringCharacter: '●',
-                        decoration: InputDecoration(
-                          labelText: 'تأكيد كلمة المرور الجديدة',
-                          prefixIcon: const Icon(Icons.lock_reset_rounded, color: AppColors.primary),
-                          suffixIcon: IconButton(
-                            icon: Icon(obscureConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
-                            onPressed: () => setDialogState(() => obscureConfirm = !obscureConfirm),
-                          ),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: auth.loading ? null : () => Navigator.pop(ctx),
-                  child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo', color: Colors.grey)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: auth.loading ? null : () async {
-                    if (passwordCtrl.text.isEmpty) {
-                      _showSnackBar(context, 'يرجى إدخال كلمة المرور الجديدة.', AppColors.danger);
-                      return;
-                    }
-                    if (passwordCtrl.text != confirmCtrl.text) {
-                      _showSnackBar(context, 'كلمتا المرور غير متطابقتين.', AppColors.danger);
-                      return;
-                    }
-                    if (!hasLength || !hasUpper || !hasLower || !hasDigit || !hasSpecial) {
-                      _showSnackBar(context, 'يرجى استيفاء جميع شروط الأمان لكلمة المرور.', AppColors.danger);
-                      return;
-                    }
-                    
-                    final ok = await auth.updatePassword(passwordCtrl.text);
-                    if (ok) {
-                      if (context.mounted) {
-                        Navigator.pop(ctx);
-                        _showSnackBar(context, 'تم تحديث كلمة المرور بنجاح.', AppColors.secondary);
-                      }
-                    } else {
-                      if (context.mounted) {
-                        _showSnackBar(context, auth.error ?? 'حدث خطأ أثناء التحديث.', AppColors.danger);
-                      }
-                    }
-                  },
-                  child: auth.loading
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('حفظ التحديث', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showFullRefreshDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        bool loading = false;
-        return StatefulBuilder(
-          builder: (dialogCtx, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              title: const Row(
-                children: [
-                  Icon(Icons.cloud_sync_rounded, color: AppColors.info, size: 26),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'تحديث كامل من الخادم',
-                      style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                  ),
-                ],
-              ),
-              content: const Text(
-                'سيتم مسح النسخة المحلية على هذا الجهاز وإعادة تنزيل كل الإجازات من الخادم.\n\n'
-                'ملاحظة: أي تعديلات محلية لم تُزامَن بعد ستُفقد، والخادم هو المصدر الموثوق. تأكّد من اتصالك بالإنترنت.',
-                style: TextStyle(fontFamily: 'Cairo', fontSize: 13, height: 1.6),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: loading ? null : () => Navigator.pop(ctx),
-                  child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo', color: Colors.grey)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.info,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: loading
-                      ? null
-                      : () async {
-                          setDialogState(() => loading = true);
-                          try {
-                            await context.read<PermitProvider>().fullRefresh();
-                            if (dialogCtx.mounted) Navigator.pop(ctx);
-                            if (context.mounted) {
-                              _showSnackBar(context, 'تم التحديث الكامل بنجاح من الخادم.', AppColors.secondary);
-                            }
-                          } catch (_) {
-                            setDialogState(() => loading = false);
-                            if (context.mounted) {
-                              _showSnackBar(context, 'تعذّر التحديث الكامل. تحقّق من اتصالك بالإنترنت وأعد المحاولة.', AppColors.danger);
-                            }
-                          }
-                        },
-                  child: loading
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('تأكيد التحديث', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showSnackBar(BuildContext context, String msg, Color bg) {
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: const TextStyle(fontFamily: 'Cairo')),
-        backgroundColor: bg,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            const SizedBox(width: 6),
+            const Icon(Icons.lock_outline_rounded, size: 16, color: Colors.grey),
+          ],
+        ),
+        onTap: onTap,
       ),
     );
   }

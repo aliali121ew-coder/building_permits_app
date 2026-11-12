@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/utils/date_utils.dart';
 import '../../providers/auth_provider.dart';
 import '../home/home_screen.dart';
 import 'login_screen.dart';
@@ -81,8 +82,9 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen> {
     final user = auth.user;
     final paused = user?.licensePaused ?? false;
     final pendingApproval = user?.approvalStatus == 'pending';
-    final suspended = user?.approvalStatus == 'suspended' || paused;
-    final expired = user?.approvalStatus == 'approved' && !paused && !(user?.isLicenseActive ?? false);
+    final locked = user?.isLocked ?? false;
+    final suspended = locked || !(user?.isActive ?? true) || user?.approvalStatus == 'suspended' || paused;
+    final expired = user?.approvalStatus == 'approved' && !suspended && !(user?.isLicenseActive ?? false);
     
     final icon = suspended 
         ? Icons.pause_circle_filled_rounded 
@@ -98,14 +100,18 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen> {
             ? AppColors.secondary 
             : AppColors.info;
             
-    final title = suspended 
-        ? 'تم إيقاف الترخيص مؤقتاً' 
+    final title = locked
+        ? 'الحساب مقفل مؤقتاً'
+        : suspended
+        ? 'الحساب موقوف' 
         : expired 
             ? 'تمت الموافقة على الحساب' 
             : 'بانتظار موافقة الإدارة';
             
-    final description = suspended 
-        ? 'تم تجميد ترخيص الحساب من قبل الإدارة. يرجى التواصل مع مدير النظام.' 
+    final description = locked
+        ? 'قفلت الإدارة هذا الحساب حتى ${AppDateUtils.formatDate(user!.lockedUntil!)}. يرجى مراجعة مدير النظام.'
+        : suspended
+        ? 'أوقفت الإدارة هذا الحساب. يرجى التواصل مع مدير النظام.' 
         : expired 
             ? 'تمت الموافقة على حسابك من قبل الإدارة بنجاح! يرجى إدخال رمز التفعيل لتنشيط اشتراكك والدخول للمنظومة.' 
             : 'تم تسجيل حسابك بنجاح وهو الآن بانتظار مراجعة وموافقة مدير النظام أولاً. بمجرد موافقة المدير، ستتمكن من إدخال رمز التفعيل وتفعيل اشتراكك.';

@@ -3,8 +3,11 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../l10n/app_strings.dart';
 import '../../models/user_model.dart';
-import '../../services/supabase_service.dart';
+import '../../services/cloudflare_api_service.dart';
+import '../../core/utils/date_utils.dart';
+import '../../widgets/password_dialogs.dart';
 import '../../widgets/professional_back_button.dart';
+import '../../widgets/user_avatar.dart';
 
 /// صفحة إدارة الصلاحيات والأدوار للمستخدمين والموظفين
 /// (التحكم الكامل بـ صلاحية الإضافة، صلاحية التعديل، صلاحية الحذف، وتغيير الدور)
@@ -26,7 +29,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   void _reload() {
     setState(() {
-      _future = SupabaseService.instance.fetchAllProfiles();
+      _future = CloudflareApiService.instance.fetchAllProfiles();
     });
   }
 
@@ -56,7 +59,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Text('حدث خطأ في جلب حسابات المستخدمين: ${snapshot.error}'),
+                child: Text('${snapshot.error}'),
               ),
             );
           }
@@ -183,7 +186,7 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
         canView: _role == AppConstants.roleAdmin ? true : _canView,
       );
 
-      await SupabaseService.instance.updateProfilePermissions(updatedUser);
+      await CloudflareApiService.instance.updateProfile(updatedUser.id, updatedUser.toApiMap());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -195,7 +198,7 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطأ أثناء حفظ الصلاحيات: $e'), backgroundColor: AppColors.danger),
+        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.danger),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -218,14 +221,10 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
             // ---- الهيدر: اسم ورتبة المستخدم ----
             Row(
               children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: (isAdmin ? AppColors.accent : AppColors.primary).withValues(alpha: 0.15),
-                  child: Icon(
-                    isAdmin ? Icons.admin_panel_settings_rounded : Icons.person_rounded,
-                    color: isAdmin ? AppColors.accent : AppColors.primary,
-                    size: 26,
-                  ),
+                UserAvatar(
+                  path: widget.user.avatarPath,
+                  name: widget.user.fullName,
+                  color: isAdmin ? AppColors.accent : AppColors.primary,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -267,11 +266,24 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
                             )
                           else
                             Text(
-                              _isActive ? '· نشط' : '· معطل',
+                              _isActive ? '· نشط' : '· موقوف',
                               style: TextStyle(
                                 fontSize: 11.5,
                                 color: _isActive ? AppColors.secondary : AppColors.danger,
                                 fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          if (widget.user.isLocked)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.danger.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                'مقفل حتى ${AppDateUtils.formatDate(widget.user.lockedUntil!)}',
+                                style:
+                                    const TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.bold),
                               ),
                             ),
                         ],
@@ -280,7 +292,10 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
                   ),
                 ),
 
-                // مفتاح تفعيل/تأشير الحساب
+                // إجراءات الحساب: كلمة المرور والقفل المؤقت
+                if (!isAdmin) _accountMenu(),
+
+                // مفتاح إيقاف/تفعيل الحساب
                 Switch(
                   value: _isActive,
                   activeThumbColor: AppColors.secondary,
@@ -424,6 +439,83 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
     );
   }
 
+  Widget _accountMenu() {
+    return PopupMenuButton<String>(
+      tooltip: 'إجراءات الحساب',
+      icon: const Icon(Icons.more_vert_rounded),
+      onSelected: (v) async {
+        switch (v) {
+          case 'reset':
+            await showResetPasswordDialog(context, widget.user);
+          case 'lock30':
+            await _lock(30);
+          case 'lock365':
+            await _lock(365);
+          case 'lockCustom':
+            final days = await _askDays();
+            if (days != null) await _lock(days);
+          case 'unlock':
+            await _lock(0);
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'reset', child: _MenuRow(Icons.lock_reset_rounded, 'إعادة تعيين كلمة المرور')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'lock30', child: _MenuRow(Icons.lock_clock_rounded, 'قفل لمدة شهر')),
+        const PopupMenuItem(value: 'lock365', child: _MenuRow(Icons.lock_rounded, 'قفل لمدة سنة')),
+        const PopupMenuItem(value: 'lockCustom', child: _MenuRow(Icons.edit_calendar_rounded, 'قفل لعدد أيام…')),
+        if (widget.user.isLocked)
+          const PopupMenuItem(value: 'unlock', child: _MenuRow(Icons.lock_open_rounded, 'فك القفل')),
+      ],
+    );
+  }
+
+  Future<int?> _askDays() async {
+    final ctrl = TextEditingController();
+    final days = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('مدة القفل بالأيام'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(hintText: 'مثال: 15', suffixText: 'يوم'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            onPressed: () {
+              final n = int.tryParse(ctrl.text.trim());
+              if (n != null && n > 0) Navigator.pop(ctx, n);
+            },
+            child: const Text('قفل'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return days;
+  }
+
+  Future<void> _lock(int days) async {
+    try {
+      await CloudflareApiService.instance.lockUser(userId: widget.user.id, days: days);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            days > 0 ? 'تم قفل حساب ${widget.user.fullName} لمدة $days يوماً' : 'تم فك قفل ${widget.user.fullName}'),
+        backgroundColor: days > 0 ? AppColors.danger : AppColors.secondary,
+      ));
+      widget.onChanged();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.danger),
+      );
+    }
+  }
+
   Widget _permissionSwitchTile({
     required String title,
     required IconData icon,
@@ -454,4 +546,15 @@ class _UserPermissionCardState extends State<_UserPermissionCard> {
       ],
     );
   }
+}
+
+class _MenuRow extends StatelessWidget {
+  const _MenuRow(this.icon, this.label);
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [Icon(icon, size: 20), const SizedBox(width: 10), Text(label)],
+      );
 }

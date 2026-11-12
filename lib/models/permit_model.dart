@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-/// نموذج إجازة البناء - يطابق أعمدة جدول public.permits في Supabase
+/// نموذج إجازة البناء - يطابق أعمدة جدول permits في D1
 /// + حقول مزامنة محلية إضافية (لا تُرسل إلى الخادم)
 class PermitModel extends Equatable {
   const PermitModel({
@@ -24,7 +24,7 @@ class PermitModel extends Equatable {
     this.updatedBy,
     this.updatedByName,
     required this.updatedAt,
-    // ---- حقول محلية فقط (لا تُخزّن في Supabase) ----
+    // ---- حقول محلية فقط (لا تُخزّن في الخادم) ----
     this.isSyncedLocally = true,
     this.isPendingDelete = false,
   });
@@ -89,8 +89,8 @@ class PermitModel extends Equatable {
     );
   }
 
-  /// خريطة للإرسال إلى Supabase (بدون الحقول المحلية)
-  Map<String, dynamic> toSupabaseMap({bool includeId = true}) {
+  /// خريطة للإرسال إلى خادم Cloudflare (بدون الحقول المحلية)
+  Map<String, dynamic> toApiMap({bool includeId = true}) {
     return {
       if (includeId) 'id': id,
       'permit_number': permitNumber,

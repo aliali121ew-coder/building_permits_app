@@ -21,6 +21,7 @@ class UserModel {
     this.licensePausedSecondsLeft,
     this.lastPausedAt,
     this.activatedCode,
+    this.lockedUntil,
   });
 
   final String id;
@@ -44,12 +45,17 @@ class UserModel {
   final int? licensePausedSecondsLeft;
   final DateTime? lastPausedAt;
   final String? activatedCode;
+  final DateTime? lockedUntil; // قفل مؤقت من المدير
 
   bool get isAdmin => role == AppConstants.roleAdmin;
   
   // التحقق من تفعيل الترخيص وصلاحيته
+  /// الحساب مقفل مؤقتاً من المدير الآن؟
+  bool get isLocked => !isAdmin && lockedUntil != null && DateTime.now().isBefore(lockedUntil!);
+
   bool get isLicenseActive {
     if (isAdmin) return true;
+    if (!isActive || isLocked) return false;
     if (approvalStatus != 'approved') return false;
     if (licensePaused) return false;
     if (licenseEndAt == null) return false;
@@ -95,6 +101,7 @@ class UserModel {
       licensePausedSecondsLeft: map['license_paused_seconds_left'] as int?,
       lastPausedAt: parseDateTime(map['last_paused_at']),
       activatedCode: map['activated_code']?.toString(),
+      lockedUntil: parseDateTime(map['locked_until']),
     );
   }
 
@@ -118,13 +125,18 @@ class UserModel {
         'license_paused_seconds_left': licensePausedSecondsLeft,
         'last_paused_at': lastPausedAt?.toIso8601String(),
         'activated_code': activatedCode,
+        'locked_until': lockedUntil?.toIso8601String(),
       };
 
-  Map<String, dynamic> toSupabaseMap() => {
+  Map<String, dynamic> toApiMap() => {
         'id': id,
         'full_name': fullName,
         'role': role,
         'is_active': isActive,
+        'can_add': canAdd,
+        'can_edit': canEdit,
+        'can_delete': canDelete,
+        'can_view': canView,
         'approval_status': approvalStatus,
         'license_start_at': licenseStartAt?.toIso8601String(),
         'license_end_at': licenseEndAt?.toIso8601String(),
@@ -175,6 +187,7 @@ class UserModel {
       licensePausedSecondsLeft: licensePausedSecondsLeft ?? this.licensePausedSecondsLeft,
       lastPausedAt: lastPausedAt ?? this.lastPausedAt,
       activatedCode: activatedCode ?? this.activatedCode,
+      lockedUntil: lockedUntil,
     );
   }
 }

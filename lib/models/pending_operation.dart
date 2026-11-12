@@ -1,4 +1,4 @@
-/// عملية بانتظار المزامنة مع Supabase عند عودة الإنترنت
+/// عملية بانتظار المزامنة مع الخادم عند عودة الإنترنت
 /// (تُخزَّن في صندوق Hive منفصل: pending_ops_box)
 class PendingOperation {
   const PendingOperation({

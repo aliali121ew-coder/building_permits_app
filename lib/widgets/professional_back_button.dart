@@ -8,9 +8,9 @@ class ProfessionalBackButton extends StatelessWidget {
     if (!Navigator.of(context).canPop()) {
       return const SizedBox.shrink();
     }
-    
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     // يراعي اتجاه اللغة (RTL/LTR) تلقائياً عند استخدام اتجاه الأيقونة الصحيح
     final isRtl = Directionality.of(context) == TextDirection.rtl;
 

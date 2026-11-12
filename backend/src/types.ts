@@ -31,6 +31,7 @@ export interface Profile {
   phone_number?: string;
   birth_date?: string;
   avatar_path?: string;
+  locked_until?: string | null;
   created_at: string;
 }
 

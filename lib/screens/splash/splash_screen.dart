@@ -29,13 +29,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   Future<void> _bootstrap() async {
     if (!mounted) return;
-    try {
-      final auth = context.read<AuthProvider>();
-      await auth.restoreSession().timeout(const Duration(milliseconds: 1500));
-    } catch (e) {
-      debugPrint('Splash restoreSession timeout: $e');
-    }
-    await Future.delayed(const Duration(milliseconds: 600));
+    context.read<AuthProvider>().restoreSession();
+    await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
     Widget target;

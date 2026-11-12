@@ -5,11 +5,15 @@ import '../../core/constants/app_colors.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/permit_provider.dart';
 import '../../providers/theme_provider.dart';
-import '../../services/supabase_service.dart';
+import '../../services/cloudflare_api_service.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/sync_indicator.dart';
 import '../../widgets/tab_switch_notification.dart';
 import '../admin/user_management_screen.dart';
+import '../admin/activity_log_screen.dart';
+import '../admin/pending_accounts_screen.dart';
+import '../../widgets/admin_gate.dart';
+import '../../widgets/user_avatar.dart';
 import '../admin/licensing_screen.dart';
 import '../auth/login_screen.dart';
 import '../permits/permit_form_screen.dart';
@@ -19,7 +23,6 @@ import '../search/search_screen.dart';
 import '../search/search_history_screen.dart';
 import '../settings/settings_screen.dart';
 import '../settings/profile_screen.dart';
-import '../../widgets/update_dialog.dart';
 import 'widgets/glass_stat_card.dart';
 
 /// الشاشة الرئيسية الرسمية لمديرية بلدية الهاشمية - قسم الإجازات
@@ -36,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showNotifications() async {
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
-    final notifications = await SupabaseService.instance.fetchNotifications(user.id);
+    final notifications = await CloudflareApiService.instance.fetchNotifications();
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -56,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       leading: Icon(item['is_read'] == true ? Icons.notifications_none_rounded : Icons.notifications_active_rounded, color: AppColors.primary),
                       title: Text(item['title']?.toString() ?? 'إشعار', style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
                       subtitle: Text(item['message']?.toString() ?? '', style: const TextStyle(fontFamily: 'Cairo')),
-                      onTap: () => SupabaseService.instance.markNotificationAsRead(item['id'].toString()),
+                      onTap: () => CloudflareApiService.instance.markNotificationAsRead(item['id'].toString()),
                     );
                   },
                 ),
@@ -71,8 +74,6 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<PermitProvider>().init();
-        // فحص تلقائي لوجود تحديث للتطبيق (صامت إن لم يوجد)
-        checkAndPromptUpdate(context);
       }
     });
   }
@@ -127,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
           decoration: BoxDecoration(
             color: isDark 
-                ? const Color(0xFF1E293B).withValues(alpha: 0.85) 
+                ? const Color(0xF71E293B)
                 : Colors.white,
             borderRadius: BorderRadius.circular(28),
             border: Border.all(
@@ -149,9 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(28),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-              child: Padding(
+            child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -163,7 +162,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-            ),
           ),
         ),
       ),
@@ -250,20 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () => Scaffold.of(context).openDrawer(),
             child: Padding(
               padding: const EdgeInsets.all(8.0),
-              child: CircleAvatar(
-                backgroundColor: isDark 
-                    ? Colors.white.withValues(alpha: 0.15) 
-                    : AppColors.primary.withValues(alpha: 0.15),
-                child: Text(
-                  auth.user?.fullName.isNotEmpty == true ? auth.user!.fullName[0] : 'م',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    color: isDark ? Colors.white : AppColors.primary,
-                    fontFamily: 'Cairo',
-                  ),
-                ),
-              ),
+              child: UserAvatar(path: auth.user?.avatarPath, name: auth.user?.fullName ?? 'م', radius: 18),
             ),
           ),
         ),
@@ -651,9 +636,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: AppColors.accent,
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const UserManagementScreen()),
-                      );
+                      openAdminScreen(context, const UserManagementScreen());
                     },
                     isDark: isDark,
                   ),
@@ -665,9 +648,31 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: AppColors.secondary,
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const LicensingScreen()),
-                      );
+                      openAdminScreen(context, const LicensingScreen());
+                    },
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildSidebarItem(
+                    context: context,
+                    icon: Icons.how_to_reg_rounded,
+                    title: 'طلبات الحسابات الجديدة',
+                    color: AppColors.info,
+                    onTap: () {
+                      Navigator.pop(context);
+                      openAdminScreen(context, const PendingAccountsScreen());
+                    },
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildSidebarItem(
+                    context: context,
+                    icon: Icons.history_rounded,
+                    title: 'سجل النشاط',
+                    color: Colors.orange,
+                    onTap: () {
+                      Navigator.pop(context);
+                      openAdminScreen(context, const ActivityLogScreen());
                     },
                     isDark: isDark,
                   ),

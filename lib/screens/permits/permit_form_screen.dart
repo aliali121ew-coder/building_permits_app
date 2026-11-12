@@ -333,9 +333,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
         });
 
         return ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child: Dialog(
+          child: Dialog(
               backgroundColor: Colors.transparent,
               elevation: 0,
               child: Container(
@@ -401,7 +399,6 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                 ),
               ),
             ),
-          ),
         );
       },
     );
