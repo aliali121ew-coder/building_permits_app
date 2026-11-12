@@ -30,3 +30,8 @@ android/.kotlin/
 !.dev.vars.example
 .env*
 !.env.example
+
+# Android signing secrets — NEVER commit these
+android/key.properties
+**/*.jks
+**/*.keystore

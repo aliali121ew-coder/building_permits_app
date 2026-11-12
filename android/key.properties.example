@@ -1,0 +1,9 @@
+# قالب إعداد توقيع أندرويد.
+# انسخ هذا الملف إلى: android/key.properties  ثم املأ القيم الحقيقية.
+# ⚠️ لا تُضِف key.properties ولا ملف .jks إلى Git (مُستبعدان في .gitignore).
+
+storePassword=ضع_كلمة_سر_المخزن
+keyPassword=ضع_كلمة_سر_المفتاح
+keyAlias=permits
+# مسار ملف المفتاح (استخدم / وليس \ حتى على ويندوز):
+storeFile=C:/Users/YOUR_NAME/keys/permits-release.jks
