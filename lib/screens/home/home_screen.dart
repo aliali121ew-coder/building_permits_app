@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/permit_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/supabase_service.dart';
+import '../../services/sync_service.dart';
 import '../../widgets/sync_indicator.dart';
 import '../../widgets/tab_switch_notification.dart';
 import '../admin/user_management_screen.dart';
@@ -13,7 +14,7 @@ import '../admin/licensing_screen.dart';
 import '../auth/login_screen.dart';
 import '../permits/permit_form_screen.dart';
 import '../permits/permit_list_screen.dart';
-import '../reports/reports_screen.dart';
+import '../search/barcode_scanner_screen.dart';
 import '../search/search_screen.dart';
 import '../search/search_history_screen.dart';
 import '../settings/settings_screen.dart';
@@ -81,16 +82,29 @@ class _HomeScreenState extends State<HomeScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final auth = context.watch<AuthProvider>();
     final hasView = auth.user?.canView ?? true;
+    final isDesktop = MediaQuery.of(context).size.width >= 900;
 
     final pages = [
-      hasView ? _buildHomeDashboard(context) : _buildLockedView(context, auth), // 0: الرئيسية
+      hasView ? _buildHomeDashboard(context) : _buildLockedView(context, auth), // 0: الاجازات
       (hasView && (auth.user?.canAdd ?? true))
           ? const PermitFormScreen()
-          : _buildLockedView(context, auth, isAddOnly: true), // 1: إضافة
-      hasView ? const SearchScreen() : _buildLockedView(context, auth), // 2: علامة البحث
-      hasView ? const ReportsScreen() : _buildLockedView(context, auth), // 3: تقارير
-      const SettingsScreen(), // 4: الإعدادات
+          : _buildLockedView(context, auth, isAddOnly: true), // 1: اضافة
+      hasView ? const BarcodeScannerScreen() : _buildLockedView(context, auth), // 2: باركود
+      const SettingsScreen(), // 3: الاعدادات
     ];
+
+    if (isDesktop) {
+      return Scaffold(
+        drawer: _buildSidebar(context, auth),
+        body: NotificationListener<TabSwitchNotification>(
+          onNotification: (notification) {
+            setState(() => _currentIndex = notification.index);
+            return true;
+          },
+          child: _buildDesktopWorkspace(context, auth, isDark),
+        ),
+      );
+    }
 
     return Scaffold(
       body: NotificationListener<TabSwitchNotification>(
@@ -142,11 +156,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'الرئيسية', isDark),
-                    _buildNavItem(1, Icons.add_circle_rounded, Icons.add_circle_outline_rounded, 'إضافة', isDark),
-                    _buildNavItem(2, Icons.search_rounded, Icons.search_rounded, 'البحث', isDark),
-                    _buildNavItem(3, Icons.analytics_rounded, Icons.analytics_outlined, 'تقارير', isDark),
-                    _buildNavItem(4, Icons.settings_rounded, Icons.settings_outlined, 'الإعدادات', isDark),
+                    _buildNavItem(0, Icons.folder_special_rounded, Icons.folder_special_outlined, 'الاجازات', isDark),
+                    _buildNavItem(1, Icons.add_circle_rounded, Icons.add_circle_outline_rounded, 'اضافة', isDark),
+                    _buildNavItem(2, Icons.qr_code_scanner_rounded, Icons.qr_code_scanner_rounded, 'باركود', isDark),
+                    _buildNavItem(3, Icons.settings_rounded, Icons.settings_outlined, 'الاعدادات', isDark),
                   ],
                 ),
               ),
@@ -167,9 +180,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final hasView = auth.user?.canView ?? true;
     final hasAdd = auth.user?.canAdd ?? true;
-    final hasEdit = auth.user?.canEdit ?? true;
 
-    // كارتات الخدمة الـ 4 الكبيرة الفاخرة
+    // كارتات الخدمة الـ 4 الكبيرة الفاخرة للهاتف (الاجازات - اضافة - باركود - الاعدادات)
     final cards = <GlassStatCard>[
       GlassStatCard(
         icon: Icons.folder_special_rounded,
@@ -182,20 +194,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
           } else {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PermitListScreen()));
-          }
-        },
-      ),
-      GlassStatCard(
-        icon: Icons.search_rounded,
-        title: 'بحث',
-        gradientColors: hasView
-            ? AppColors.cardGradients[1]
-            : [Colors.grey.shade700, Colors.grey.shade600],
-        onTap: () {
-          if (!hasView) {
-            _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
-          } else {
-            setState(() => _currentIndex = 2);
           }
         },
       ),
@@ -216,19 +214,25 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
       GlassStatCard(
-        icon: Icons.edit_note_rounded,
-        title: 'تعديل',
-        gradientColors: (hasView && hasEdit)
-            ? AppColors.cardGradients[3]
+        icon: Icons.qr_code_scanner_rounded,
+        title: 'باركود',
+        gradientColors: hasView
+            ? AppColors.cardGradients[1]
             : [Colors.grey.shade700, Colors.grey.shade600],
         onTap: () {
           if (!hasView) {
             _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
-          } else if (!hasEdit) {
-            _showNoPermissionSnackBar(context, 'تعديل البيانات');
           } else {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PermitListScreen(sortByRecentEdits: true)));
+            setState(() => _currentIndex = 2);
           }
+        },
+      ),
+      GlassStatCard(
+        icon: Icons.settings_rounded,
+        title: 'الاعدادات',
+        gradientColors: AppColors.cardGradients[3],
+        onTap: () {
+          setState(() => _currentIndex = 3);
         },
       ),
     ];
@@ -851,6 +855,481 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // =========================================================
+  // واجهة الكمبيوتر المخصصة (Desktop Workspace: تبويبان رئيسيان: إضافة والبحث)
+  // =========================================================
+  Widget _buildDesktopWorkspace(BuildContext context, AuthProvider auth, bool isDark) {
+    final hasView = auth.user?.canView ?? true;
+    final hasAdd = auth.user?.canAdd ?? true;
+    final permitProvider = context.watch<PermitProvider>();
+
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF0B111E), const Color(0xFF101929), const Color(0xFF0B111E)]
+              : [const Color(0xFFF1F5F9), const Color(0xFFE2E8F0)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Column(
+        children: [
+          // الشريط العلوي للكمبيوتر (القائمة الجانبية + التبديل بين الرئيسية / إضافة / بحث + الأدوات)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.95),
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.07),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Builder(
+                  builder: (ctx) => InkWell(
+                    onTap: () => Scaffold.of(ctx).openDrawer(),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withValues(alpha: 0.08) : AppColors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.menu_rounded, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            auth.user?.fullName ?? 'القائمة والإدارة',
+                            style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 20),
+                // أزرار التنقل السريع في الكمبيوتر (الرئيسية | البحث | إضافة)
+                _buildDesktopTopTabButton(
+                  index: 0,
+                  icon: Icons.dashboard_rounded,
+                  label: 'الرئيسية',
+                  activeColor: AppColors.primary,
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 10),
+                _buildDesktopTopTabButton(
+                  index: 2,
+                  icon: Icons.search_rounded,
+                  label: 'البحث والاستعلام',
+                  activeColor: const Color(0xFF2E7D5B),
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 10),
+                _buildDesktopTopTabButton(
+                  index: 1,
+                  icon: Icons.add_circle_outline_rounded,
+                  label: 'إضافة إجازة',
+                  activeColor: const Color(0xFFB38222),
+                  isDark: isDark,
+                ),
+                const Spacer(),
+                // حالة السحابة والأدوات
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: permitProvider.syncStatus == SyncStatus.offline ? Colors.orange : const Color(0xFF22C55E),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'السجل السحابي: ${permitProvider.totalCount} إجازة',
+                        style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const SyncIndicator(),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+                  tooltip: 'تغيير المظهر',
+                  onPressed: () => context.read<ThemeProvider>().toggle(context),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.notifications_none_rounded),
+                  tooltip: 'الإشعارات',
+                  onPressed: _showNotifications,
+                ),
+              ],
+            ),
+          ),
+
+          // المحتوى الرئيسي للكمبيوتر
+          Expanded(
+            child: !hasView
+                ? _buildLockedView(context, auth)
+                : _currentIndex == 1
+                    ? (hasAdd
+                        ? PermitFormScreen(
+                            isEmbeddedDesktop: true,
+                            onSavedOrBack: () => setState(() => _currentIndex = 0),
+                          )
+                        : _buildLockedView(context, auth, isAddOnly: true))
+                    : _currentIndex == 2
+                        ? const SearchScreen(isEmbeddedDesktop: true)
+                        : _buildDesktopTwoCardsHome(context, isDark, hasView, hasAdd),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopTopTabButton({
+    required int index,
+    required IconData icon,
+    required String label,
+    required Color activeColor,
+    required bool isDark,
+  }) {
+    final isSelected = _currentIndex == index;
+    return InkWell(
+      onTap: () {
+        final auth = context.read<AuthProvider>();
+        final hasView = auth.user?.canView ?? true;
+        final hasAdd = auth.user?.canAdd ?? true;
+        if (!hasView) {
+          _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
+          return;
+        }
+        if (index == 1 && !hasAdd) {
+          _showNoPermissionSnackBar(context, 'إضافة إجازات جديدة');
+          return;
+        }
+        setState(() => _currentIndex = index);
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected
+                ? activeColor
+                : (isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.1)),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// الشاشة الرئيسية للكمبيوتر بعد الدخول: الهيدر الرسمي + تبويبين كبيرين (إضافة والبحث)
+  Widget _buildDesktopTwoCardsHome(BuildContext context, bool isDark, bool hasView, bool hasAdd) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 28),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1220),
+          child: Column(
+            children: [
+              // 1. الهيدر العلوي المطابق للصورة الرسمية (مديرية بلدية الهاشمية)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isDark
+                        ? [const Color(0xFF1E293B), const Color(0xFF141E30)]
+                        : [AppColors.primary, AppColors.primaryDark],
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft,
+                  ),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.2),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.18),
+                      blurRadius: 28,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1.5),
+                      ),
+                      child: const Icon(Icons.account_balance_rounded, color: Colors.white, size: 36),
+                    ),
+                    const SizedBox(width: 18),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'مديرية بلدية الهاشمية',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              fontFamily: 'Cairo',
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'منظومة إجازات البناء الرقمية الموحدة',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13.5,
+                              fontFamily: 'Cairo',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 30),
+
+              // 2. شارة "قسم الإجازات" في المنتصف بين خطين
+              Row(
+                children: [
+                  Expanded(
+                    child: Divider(
+                      thickness: 1.2,
+                      endIndent: 16,
+                      color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black26,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF162235) : AppColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.35) : AppColors.primary.withValues(alpha: 0.3),
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.stars_rounded, color: Color(0xFF38BDF8), size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'قسم الإجازات',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: isDark ? Colors.white : AppColors.primary,
+                            fontFamily: 'Cairo',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Divider(
+                      thickness: 1.2,
+                      indent: 16,
+                      color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black26,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 36),
+
+              // 3. التبويبان الكبيران للكمبيوتر: (بحث) و (اضافة) بتصميم ثلاثي الأبعاد مطابق للصورة
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 880),
+                child: Row(
+                  children: [
+                    // كارت البحث
+                    Expanded(
+                      child: _buildDesktopHeroCard(
+                        title: 'بحث',
+                        subtitle: 'البحث برقم الإجازة أو العقار أو الاسم الثلاثي أو رقم القطعة وتصدير PDF',
+                        icon: Icons.search_rounded,
+                        gradientColors: const [Color(0xFF357A5B), Color(0xFF23533D)],
+                        glowColor: const Color(0xFF34D399),
+                        onTap: () {
+                          if (!hasView) {
+                            _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
+                          } else {
+                            setState(() => _currentIndex = 2);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 28),
+                    // كارت الإضافة
+                    Expanded(
+                      child: _buildDesktopHeroCard(
+                        title: 'اضافة',
+                        subtitle: 'إدخال معاملة وإجازة بناء جديدة مع المساحات والمرفقات بتصميم احترافي',
+                        icon: Icons.add_circle_rounded,
+                        gradientColors: const [Color(0xFFAE872B), Color(0xFF7D5F18)],
+                        glowColor: const Color(0xFFFBBF24),
+                        onTap: () {
+                          if (!hasView) {
+                            _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
+                          } else if (!hasAdd) {
+                            _showNoPermissionSnackBar(context, 'إضافة إجازات جديدة');
+                          } else {
+                            setState(() => _currentIndex = 1);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopHeroCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required List<Color> gradientColors,
+    required Color glowColor,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          height: 290,
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: gradientColors,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.22),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: glowColor.withValues(alpha: 0.28),
+                blurRadius: 32,
+                spreadRadius: -2,
+                offset: const Offset(0, 14),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 74,
+                height: 74,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.35),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(icon, color: Colors.white, size: 36),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'Cairo',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  fontSize: 13,
+                  fontFamily: 'Cairo',
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildNavItem(int index, IconData selectedIcon, IconData unselectedIcon, String label, bool isDark) {
     final isSelected = _currentIndex == index;
     final activeColor = index == 1 
@@ -868,7 +1347,7 @@ class _HomeScreenState extends State<HomeScreen> {
           final hasView = auth.user?.canView ?? true;
           final hasAdd = auth.user?.canAdd ?? true;
 
-          if (index != 4 && !hasView) {
+          if (index != 3 && !hasView) {
             _showNoPermissionSnackBar(context, 'مشاهدة البيانات');
             return;
           }

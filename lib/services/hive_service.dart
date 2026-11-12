@@ -164,9 +164,16 @@ class HiveService {
 
   // ===================== جلسة المستخدم (كاش محلي) =====================
 
+  String? getAuthToken() => _settingsBox.get('auth_jwt_token') as String?;
+  Future<void> setAuthToken(String token) => _settingsBox.put('auth_jwt_token', token);
+  Future<void> clearAuthToken() => _settingsBox.delete('auth_jwt_token');
+
   Map? getCachedUser() => _userBox.get('current_user') as Map?;
   Future<void> setCachedUser(Map data) => _userBox.put('current_user', data);
-  Future<void> clearCachedUser() => _userBox.delete('current_user');
+  Future<void> clearCachedUser() async {
+    await clearAuthToken();
+    await _userBox.delete('current_user');
+  }
 
   // ===================== حفظ بيانات تسجيل الدخول الأخيرة =====================
   Future<void> saveLastCredentials(String email, String password) async {

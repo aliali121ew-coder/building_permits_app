@@ -1,0 +1,8 @@
+node_modules/
+dist-check/
+.wrangler/
+.dev.vars
+
+
+# بيانات المواطنين المُرحّلة — لا تُرفع إلى git
+migrated_permits.sql

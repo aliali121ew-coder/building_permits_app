@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -15,11 +16,19 @@ import '../../providers/permit_provider.dart';
 import '../../widgets/professional_back_button.dart';
 import '../../widgets/tab_switch_notification.dart';
 
-/// شاشة إضافة/تعديل إجازة متطورة مع واجهة UI/UX احترافية
+/// شاشة إضافة/تعديل إجازة متطورة مع واجهة UI/UX احترافية للهاتف والكمبيوتر
 /// + إمكانية إرفاق ملفات PDF وصور وربطها بالإجازة
 class PermitFormScreen extends StatefulWidget {
-  const PermitFormScreen({super.key, this.existing});
+  const PermitFormScreen({
+    super.key,
+    this.existing,
+    this.isEmbeddedDesktop = false,
+    this.onSavedOrBack,
+  });
+
   final PermitModel? existing;
+  final bool isEmbeddedDesktop;
+  final VoidCallback? onSavedOrBack;
 
   bool get isEdit => existing != null;
 
@@ -76,7 +85,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
   }
 
   void _onYearChanged() {
-    if (!widget.isEdit) {
+    if (!widget.isEdit && mounted) {
       final parsedYear = int.tryParse(_yearCtrl.text);
       if (parsedYear != null && parsedYear > 1900 && parsedYear < 2100) {
         final suggested = context.read<PermitProvider>().suggestNextNumber(parsedYear);
@@ -87,6 +96,23 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
         }
       }
     }
+  }
+
+  void _resetFormFields() {
+    _nameCtrl.clear();
+    _plotCtrl.clear();
+    _notesCtrl.clear();
+    _nameChangeCtrl.clear();
+    _plotAreaCtrl.clear();
+    _buildingAreaCtrl.clear();
+    _newRegistryNameCtrl.clear();
+    setState(() {
+      _attachmentPaths.clear();
+      _permitType = null;
+      _date = DateTime.now();
+      _yearCtrl.text = DateTime.now().year.toString();
+    });
+    _onYearChanged();
   }
 
   @override
@@ -111,24 +137,32 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
         type: FileType.custom,
         allowedExtensions: ['pdf'],
       );
-      if (result != null && result.files.single.path != null) {
-        final path = result.files.single.path!;
-        final file = File(path);
-        final sizeInBytes = await file.length();
-        final sizeInMb = sizeInBytes / (1024 * 1024);
-        if (sizeInMb > 5.0) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('حجم المرفق يتجاوز الحد الأقصى المسموح به (5 ميجابايت)')),
-          );
+      if (result != null && result.files.isNotEmpty) {
+        final picked = result.files.single;
+        if (kIsWeb) {
+          setState(() {
+            _attachmentPaths.add(picked.name);
+          });
           return;
         }
-        // نسخ الملف إلى مجلد دائم كي لا يحذفه النظام عند تنظيف الكاش
-        final savedPath = await AttachmentStorage.persist(path);
-        if (!mounted) return;
-        setState(() {
-          _attachmentPaths.add(savedPath);
-        });
+        if (picked.path != null) {
+          final path = picked.path!;
+          final file = File(path);
+          final sizeInBytes = await file.length();
+          final sizeInMb = sizeInBytes / (1024 * 1024);
+          if (sizeInMb > 5.0) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('حجم المرفق يتجاوز الحد الأقصى المسموح به (5 ميجابايت)')),
+            );
+            return;
+          }
+          final savedPath = await AttachmentStorage.persist(path);
+          if (!mounted) return;
+          setState(() {
+            _attachmentPaths.add(savedPath);
+          });
+        }
       }
     } catch (_) {
       if (!mounted) return;
@@ -140,6 +174,18 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
 
   /// التقاط صورة من الكاميرا أو اختيار من الجهاز
   Future<void> _pickImage() async {
+    if (kIsWeb) {
+      try {
+        final result = await FilePicker.platform.pickFiles(type: FileType.image);
+        if (result != null && result.files.isNotEmpty) {
+          setState(() {
+            _attachmentPaths.add(result.files.single.name);
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
@@ -170,7 +216,6 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  // التقاط من الكاميرا
                   _buildPickerOption(
                     icon: Icons.camera_alt_rounded,
                     label: 'التقاط من الكاميرا',
@@ -180,7 +225,6 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                       _getImage(ImageSource.camera);
                     },
                   ),
-                  // تحميل من الجهاز
                   _buildPickerOption(
                     icon: Icons.photo_library_rounded,
                     label: 'تحميل من الجهاز',
@@ -244,6 +288,12 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
         maxWidth: 1200,
       );
       if (photo != null) {
+        if (kIsWeb) {
+          setState(() {
+            _attachmentPaths.add(photo.name);
+          });
+          return;
+        }
         final file = File(photo.path);
         final sizeInBytes = await file.length();
         final sizeInMb = sizeInBytes / (1024 * 1024);
@@ -254,7 +304,6 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
           );
           return;
         }
-        // نسخ الصورة إلى مجلد دائم كي لا يحذفها النظام عند تنظيف الكاش
         final savedPath = await AttachmentStorage.persist(photo.path);
         if (!mounted) return;
         setState(() {
@@ -276,8 +325,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
       barrierColor: Colors.black.withValues(alpha: 0.45),
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        
-        // إغلاق تلقائي
+
         Future.delayed(const Duration(seconds: 2), () {
           if (ctx.mounted) {
             Navigator.of(ctx).pop();
@@ -293,8 +341,8 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
               child: Container(
                 padding: const EdgeInsets.all(28),
                 decoration: BoxDecoration(
-                  color: isDark 
-                      ? const Color(0xFF1E293B).withValues(alpha: 0.9) 
+                  color: isDark
+                      ? const Color(0xFF1E293B).withValues(alpha: 0.9)
                       : Colors.white.withValues(alpha: 0.9),
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
@@ -433,7 +481,6 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
       final msg = context.tr('saved_successfully');
       _showSuccessDialog(context, msg);
 
-      // انتظر قليلاً ريثما تختفي النافذة التجميلية
       await Future.delayed(const Duration(milliseconds: 2100));
 
       if (!mounted) return;
@@ -443,22 +490,12 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
           Navigator.of(context).pop();
         }
       } else {
-        // مسح الحقول بالكامل لتكون نظيفة في المرة القادمة
-        _nameCtrl.clear();
-        _plotCtrl.clear();
-        _notesCtrl.clear();
-        _nameChangeCtrl.clear();
-        _plotAreaCtrl.clear();
-        _buildingAreaCtrl.clear();
-        _newRegistryNameCtrl.clear();
-        _attachmentPaths.clear();
-        
-        // إعادة تهيئة السنة والتسلسل
-        _yearCtrl.text = DateTime.now().year.toString();
-        _onYearChanged();
-
-        // توجيه التبويب للرئيسية (Index 0)
-        TabSwitchNotification(0).dispatch(context);
+        _resetFormFields();
+        if (widget.onSavedOrBack != null) {
+          widget.onSavedOrBack!();
+        } else {
+          TabSwitchNotification(0).dispatch(context);
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -476,16 +513,23 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final auth = context.watch<AuthProvider>();
     final isEdit = widget.isEdit;
+    final isDesktop = MediaQuery.of(context).size.width >= 900;
 
     final hasAdd = auth.user?.canAdd ?? true;
     final hasEdit = auth.user?.canEdit ?? true;
+    final availableTypes = <String>{
+      ...AppConstants.permitTypes,
+      if (_permitType != null && _permitType!.isNotEmpty) _permitType!,
+    }.toList();
 
     if ((isEdit && !hasEdit) || (!isEdit && !hasAdd)) {
       return Scaffold(
-        appBar: AppBar(
-          leading: const ProfessionalBackButton(),
-          title: Text(isEdit ? context.tr('edit_permit') : context.tr('add_permit')),
-        ),
+        appBar: widget.isEmbeddedDesktop
+            ? null
+            : AppBar(
+                leading: const ProfessionalBackButton(),
+                title: Text(isEdit ? context.tr('edit_permit') : context.tr('add_permit')),
+              ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -507,7 +551,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  isEdit 
+                  isEdit
                       ? 'تم إيقاف صلاحية تعديل الإجازات لهذا الحساب من قبل مسؤول النظام.'
                       : 'تم إيقاف صلاحية إضافة إجازات جديدة لهذا الحساب من قبل مسؤول النظام.',
                   textAlign: TextAlign.center,
@@ -520,6 +564,317 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
       );
     }
 
+    // ---- واجهة الكمبيوتر الاحترافية المكونة من عمودين (Desktop Executive Form) ----
+    if (isDesktop) {
+      final desktopBody = Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1140),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildDesktopFormBanner(isDark),
+                  const SizedBox(height: 24),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // العمود الأيمن: البيانات الأساسية والمواطن والعقار
+                      Expanded(
+                        flex: 6,
+                        child: Column(
+                          children: [
+                            _buildCardSection(
+                              title: '1. بيانات الإجازة الرسمية والتصنيف',
+                              icon: Icons.assignment_rounded,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: _permitNumberCtrl,
+                                        readOnly: !widget.isEdit,
+                                        keyboardType: TextInputType.number,
+                                        decoration: InputDecoration(
+                                          labelText: widget.isEdit ? context.tr('permit_number') : 'رقم الإجازة (تلقائي 🔒)',
+                                          prefixIcon: const Icon(Icons.tag_rounded, color: AppColors.primary),
+                                        ),
+                                        validator: Validators.permitNumber,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: _yearCtrl,
+                                        keyboardType: TextInputType.number,
+                                        decoration: InputDecoration(
+                                          labelText: context.tr('permit_year'),
+                                          prefixIcon: const Icon(Icons.calendar_today_rounded, color: AppColors.primary),
+                                        ),
+                                        validator: Validators.permitYear,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: _pickDate,
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: InputDecorator(
+                                          decoration: InputDecoration(
+                                            labelText: context.tr('permit_date'),
+                                            prefixIcon: const Icon(Icons.event_rounded, color: AppColors.secondary),
+                                          ),
+                                          child: Text(
+                                            '${_date.year}-${_date.month.toString().padLeft(2, '0')}-${_date.day.toString().padLeft(2, '0')}',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Cairo'),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  isExpanded: true,
+                                  initialValue: _permitType,
+                                  decoration: InputDecoration(
+                                    labelText: context.tr('permit_type'),
+                                    prefixIcon: const Icon(Icons.category_rounded, color: AppColors.primary),
+                                  ),
+                                  items: availableTypes
+                                      .map((t) => DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis)))
+                                      .toList(),
+                                  onChanged: (v) => setState(() => _permitType = v),
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: availableTypes.map((type) {
+                                    final selected = _permitType == type;
+                                    return ChoiceChip(
+                                      label: Text(
+                                        type,
+                                        style: TextStyle(
+                                          fontFamily: 'Cairo',
+                                          fontSize: 12,
+                                          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                                          color: selected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+                                        ),
+                                      ),
+                                      selected: selected,
+                                      selectedColor: AppColors.primary,
+                                      onSelected: (_) => setState(() => _permitType = type),
+                                    );
+                                  }).toList(),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _buildCardSection(
+                              title: '2. بيانات المواطن والعقار / القطعة',
+                              icon: Icons.person_rounded,
+                              children: [
+                                TextFormField(
+                                  controller: _nameCtrl,
+                                  decoration: InputDecoration(
+                                    labelText: '${context.tr('full_name')} (الاسم الثلاثي واللقب)',
+                                    prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.primary),
+                                  ),
+                                  validator: (v) => Validators.required(v, message: context.tr('required_field')),
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: _plotCtrl,
+                                        decoration: InputDecoration(
+                                          labelText: '${context.tr('plot_number')} / العقار',
+                                          prefixIcon: const Icon(Icons.grid_view_rounded, color: AppColors.primary),
+                                        ),
+                                        validator: (v) => Validators.required(v, message: context.tr('required_field')),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: _newRegistryNameCtrl,
+                                        decoration: InputDecoration(
+                                          labelText: context.tr('name_per_new_registry'),
+                                          prefixIcon: const Icon(Icons.badge_rounded, color: AppColors.secondary),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _buildCardSection(
+                              title: '3. المساحات الهندسية المعتمدة (م²)',
+                              icon: Icons.square_foot_rounded,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: _plotAreaCtrl,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        decoration: InputDecoration(
+                                          labelText: context.tr('plot_area'),
+                                          suffixText: 'م²',
+                                          prefixIcon: const Icon(Icons.crop_square_rounded, color: AppColors.accent),
+                                        ),
+                                        validator: Validators.positiveNumber,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: _buildingAreaCtrl,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        decoration: InputDecoration(
+                                          labelText: context.tr('building_area'),
+                                          suffixText: 'م²',
+                                          prefixIcon: const Icon(Icons.domain_rounded, color: AppColors.secondary),
+                                        ),
+                                        validator: Validators.positiveNumber,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 22),
+                      // العمود الأيسر: الملاحظات والمرفقات وأزرار الحفظ
+                      Expanded(
+                        flex: 5,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildCardSection(
+                              title: '4. الملاحظات وتغييرات الأسماء',
+                              icon: Icons.note_alt_rounded,
+                              children: [
+                                TextFormField(
+                                  controller: _notesCtrl,
+                                  maxLines: 3,
+                                  decoration: InputDecoration(
+                                    labelText: context.tr('notes'),
+                                    prefixIcon: const Icon(Icons.notes_rounded, color: AppColors.info),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextFormField(
+                                  controller: _nameChangeCtrl,
+                                  maxLines: 2,
+                                  decoration: InputDecoration(
+                                    labelText: context.tr('name_change_notes'),
+                                    prefixIcon: const Icon(Icons.published_with_changes_rounded, color: AppColors.accent),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _buildAttachmentsSection(isDark),
+                            const SizedBox(height: 24),
+                            // بطاقة الإجراءات والحفظ السحابي
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: isDark
+                                      ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                                      : [Colors.white, const Color(0xFFF8FAFC)],
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: AppColors.secondary.withValues(alpha: 0.35),
+                                  width: 1.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.secondary.withValues(alpha: 0.12),
+                                    blurRadius: 18,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFC28E26),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 18),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      elevation: 4,
+                                    ),
+                                    onPressed: _saving ? null : _submit,
+                                    icon: _saving
+                                        ? const SizedBox(
+                                            width: 22,
+                                            height: 22,
+                                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                                          )
+                                        : const Icon(Icons.cloud_upload_rounded, size: 24),
+                                    label: Text(
+                                      widget.isEdit ? 'حفظ التعديلات في السحابة' : 'حفظ وتخزين الإجازة الجديدة',
+                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Cairo'),
+                                    ),
+                                  ),
+                                  if (!widget.isEdit) ...[
+                                    const SizedBox(height: 12),
+                                    OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(vertical: 14),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                      ),
+                                      onPressed: _resetFormFields,
+                                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                                      label: const Text(
+                                        'تفريغ الحقول وإعادة التعيين',
+                                        style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      if (widget.isEmbeddedDesktop) {
+        return desktopBody;
+      }
+
+      return Scaffold(
+        appBar: AppBar(
+          leading: const ProfessionalBackButton(),
+          title: Text(widget.isEdit ? context.tr('edit_permit') : context.tr('add_permit')),
+        ),
+        body: desktopBody,
+      );
+    }
+
+    // ---- واجهة الهاتف الأصلية كما هي تماماً ----
     return Scaffold(
       appBar: AppBar(
         leading: const ProfessionalBackButton(),
@@ -535,7 +890,6 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ---- هيدر تجميلي زجاجي ----
                   _buildFormHeader(isDark),
                   const SizedBox(height: 16),
 
@@ -580,7 +934,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                           labelText: context.tr('permit_type'),
                           prefixIcon: const Icon(Icons.category_rounded, color: AppColors.primary),
                         ),
-                        items: AppConstants.permitTypes
+                        items: availableTypes
                             .map((t) => DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis)))
                             .toList(),
                         onChanged: (v) => setState(() => _permitType = v),
@@ -724,6 +1078,92 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
     );
   }
 
+  Widget _buildDesktopFormBanner(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFB38222), Color(0xFF7D5812)],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.amber.withValues(alpha: 0.35), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFB38222).withValues(alpha: 0.25),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1.5),
+            ),
+            child: Icon(
+              widget.isEdit ? Icons.edit_document : Icons.add_circle_outline_rounded,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.isEdit ? 'تعديل بيانات إجازة البناء' : 'إضافة إجازة بناء جديدة — بوابة سطح المكتب',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Cairo',
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'أدخل البيانات الرسمية للمواطن والعقار والمساحات مع إمكانية إرفاق الوثائق والصور ليتم حفظها ومزامنتها فوراً',
+                  style: TextStyle(color: Colors.white70, fontSize: 13, fontFamily: 'Cairo'),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+            ),
+            child: Column(
+              children: [
+                const Text(
+                  'رقم الإجازة الحالي',
+                  style: TextStyle(color: Colors.white70, fontSize: 11, fontFamily: 'Cairo'),
+                ),
+                Text(
+                  '${_yearCtrl.text} / ${_permitNumberCtrl.text}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    fontFamily: 'Cairo',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFormHeader(bool isDark) {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -783,7 +1223,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF162232) : Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -808,13 +1248,18 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                    fontFamily: 'Cairo',
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-          const Divider(height: 20),
+          const Divider(height: 22),
           ...children,
         ],
       ),
@@ -829,40 +1274,33 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
       children: [
         Row(
           children: [
-            // زر اختيار PDF
             Expanded(
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   side: const BorderSide(color: AppColors.danger),
                 ),
-                icon: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.danger, size: 16),
+                icon: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.danger, size: 18),
                 label: const FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text('إضافة ملف PDF', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold, fontSize: 11.5)),
+                  child: Text('إضافة ملف PDF', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Cairo')),
                 ),
                 onPressed: _pickPdf,
               ),
             ),
-            const SizedBox(width: 6),
-
-            // زر اختيار صورة
+            const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   side: const BorderSide(color: AppColors.secondary),
                 ),
-                icon: const Icon(Icons.add_a_photo_rounded, color: AppColors.secondary, size: 16),
+                icon: const Icon(Icons.add_a_photo_rounded, color: AppColors.secondary, size: 18),
                 label: const FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text('إضافة صورة', style: TextStyle(color: AppColors.secondary, fontWeight: FontWeight.bold, fontSize: 11.5)),
+                  child: Text('إضافة صورة', style: TextStyle(color: AppColors.secondary, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Cairo')),
                 ),
                 onPressed: _pickImage,
               ),
@@ -870,11 +1308,9 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
           ],
         ),
         const SizedBox(height: 12),
-
-        // عرض قائمة الملفات المرفقة
         if (_attachmentPaths.isEmpty)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(12),
@@ -887,7 +1323,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                 Expanded(
                   child: Text(
                     'لم يتم إرفاق وثائق بعد. اضغط أعلاه لإدراج PDF أو صور.',
-                    style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey, fontFamily: 'Cairo'),
                   ),
                 ),
               ],
@@ -899,7 +1335,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
               final idx = entry.key;
               final path = entry.value;
               final isPdf = path.toLowerCase().endsWith('.pdf');
-              final fileName = path.split(Platform.pathSeparator).last;
+              final fileName = path.split('/').last.split('\\').last;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),

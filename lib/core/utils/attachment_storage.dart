@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -19,7 +20,9 @@ class AttachmentStorage {
   /// - إن كان الملف داخل المجلد الدائم أصلاً، يُعاد مساره كما هو (لا نسخ مكرر).
   /// - إن كان المصدر غير موجود أو رابطاً بعيداً (http)، يُعاد المسار كما هو.
   static Future<String> persist(String sourcePath) async {
-    // الروابط البعيدة (مثل روابط Supabase الموقّعة) تُترك كما هي.
+    if (kIsWeb) return sourcePath;
+
+    // الروابط البعيدة (مثل روابط السيرفر أو R2) تُترك كما هي.
     if (sourcePath.startsWith('http://') || sourcePath.startsWith('https://')) {
       return sourcePath;
     }

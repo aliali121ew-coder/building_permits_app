@@ -60,6 +60,7 @@ dependencies:
   glassmorphism: ^3.0.0
   flutter_svg: ^2.0.10+1
   shimmer: ^3.0.0
+  mobile_scanner: ^7.3.0
 
 
 

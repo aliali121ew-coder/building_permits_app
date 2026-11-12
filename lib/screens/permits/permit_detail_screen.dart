@@ -1,5 +1,8 @@
 import 'dart:ui' as ui;
+import 'package:barcode/barcode.dart' as bc;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:open_filex/open_filex.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/utils/date_utils.dart';
@@ -9,24 +12,24 @@ import '../../services/pdf_service.dart';
 import '../../services/excel_service.dart';
 import 'permit_form_screen.dart';
 
-class PermitDetailScreen extends StatelessWidget {
+class PermitDetailScreen extends StatefulWidget {
   const PermitDetailScreen({super.key, required this.permit, this.canEdit = false});
   final PermitModel permit;
   final bool canEdit;
 
-  /// فتح تفاصيل الإجازة في نافذة 3D متطورة مع خلفية ضبابية (Glassmorphic 3D Dialog)
+  /// فتح تفاصيل الإجازة في نافذة وسط الصفحة (Glassmorphic 3D Dialog)
   static Future<void> show(BuildContext context, PermitModel permit, {bool canEdit = false}) {
     return showGeneralDialog(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'إغلاق',
       barrierColor: Colors.black.withValues(alpha: 0.65),
-      transitionDuration: const Duration(milliseconds: 350),
+      transitionDuration: const Duration(milliseconds: 320),
       pageBuilder: (ctx, anim1, anim2) => PermitDetailScreen(permit: permit, canEdit: canEdit),
       transitionBuilder: (ctx, anim1, anim2, child) {
         final scale = CurvedAnimation(parent: anim1, curve: Curves.easeOutBack).value;
         return Transform.scale(
-          scale: scale.clamp(0.85, 1.0),
+          scale: scale.clamp(0.88, 1.0),
           child: FadeTransition(
             opacity: anim1,
             child: child,
@@ -37,28 +40,176 @@ class PermitDetailScreen extends StatelessWidget {
   }
 
   @override
+  State<PermitDetailScreen> createState() => _PermitDetailScreenState();
+}
+
+class _PermitDetailScreenState extends State<PermitDetailScreen> {
+  bool _exportingPdf = false;
+  bool _exportingExcel = false;
+  bool _printingBarcode = false;
+
+  PermitModel get permit => widget.permit;
+
+  void _showBarcodeDialog() {
+    final qrSvg = bc.Barcode.qrCode().toSvg(
+      'PERMIT:${permit.permitYear}/${permit.permitNumber}',
+      width: 200,
+      height: 200,
+      drawText: false,
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          'باركود إجازة ${permit.permitYear} / ${permit.permitNumber}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+              ),
+              child: SvgPicture.string(qrSvg, width: 190, height: 190),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              permit.fullName,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            Text(
+              'قطعة: ${permit.plotNumber}',
+              style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _handlePrintBarcode();
+            },
+            icon: const Icon(Icons.print_rounded, size: 18),
+            label: const Text('طباعة الباركود', style: TextStyle(fontFamily: 'Cairo')),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إغلاق', style: TextStyle(fontFamily: 'Cairo')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _copyPermitSummary() {
+    final summary = [
+      'مديرية بلدية الهاشمية - قسم الإجازات',
+      'إجازة رقم: ${permit.permitYear} / ${permit.permitNumber}',
+      'الاسم الثلاثي: ${permit.fullName}',
+      'رقم القطعة / العقار: ${permit.plotNumber}',
+      'التاريخ: ${AppDateUtils.formatDate(permit.permitDate)}',
+      if (permit.permitType.isNotEmpty) 'نوع الإجازة: ${permit.permitType}',
+      if (permit.plotArea != null) 'مساحة العرصة: ${permit.plotArea} م²',
+      if (permit.buildingArea != null) 'مساحة البناء: ${permit.buildingArea} م²',
+      if (permit.notes.isNotEmpty) 'الملاحظات: ${permit.notes}',
+    ].join('\n');
+
+    Clipboard.setData(ClipboardData(text: summary));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('تم نسخ بيانات الإجازة إلى الحافظة بنجاح', style: TextStyle(fontFamily: 'Cairo')),
+        backgroundColor: AppColors.secondary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Future<void> _handleExportPdf() async {
+    if (_exportingPdf) return;
+    setState(() => _exportingPdf = true);
+    try {
+      await PdfService.instance.exportOrOpenSinglePermitPdf(permit);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر تصدير ملف PDF: $e', style: const TextStyle(fontFamily: 'Cairo')),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
+  }
+
+  Future<void> _handlePrintBarcode() async {
+    if (_printingBarcode) return;
+    setState(() => _printingBarcode = true);
+    try {
+      await PdfService.instance.printPermitBarcode(permit);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر طباعة الباركود: $e', style: const TextStyle(fontFamily: 'Cairo')),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _printingBarcode = false);
+    }
+  }
+
+  Future<void> _handleExportExcel() async {
+    if (_exportingExcel) return;
+    setState(() => _exportingExcel = true);
+    try {
+      await ExcelService.instance.exportAndOpenPermits([permit]);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر تصدير ملف Excel: $e', style: const TextStyle(fontFamily: 'Cairo')),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingExcel = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return BackdropFilter(
-      filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
       child: Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
         elevation: 0,
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 580),
+          constraints: const BoxConstraints(maxWidth: 640),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xEC1E293B) : const Color(0xF7FFFFFF),
+            color: isDark ? const Color(0xF21E293B) : const Color(0xFAFFFFFF),
             borderRadius: BorderRadius.circular(28),
             border: Border.all(
-              color: isDark ? Colors.white.withValues(alpha: 0.15) : AppColors.primary.withValues(alpha: 0.2),
+              color: isDark ? Colors.white.withValues(alpha: 0.16) : AppColors.primary.withValues(alpha: 0.22),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 36,
+                color: Colors.black.withValues(alpha: 0.45),
+                blurRadius: 40,
                 spreadRadius: 4,
                 offset: const Offset(0, 18),
               ),
@@ -75,17 +226,17 @@ class PermitDetailScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ---- 1. الهيدر 3D الجذاب ----
+                // ---- 1. الهيدر الرسمي الفاخر ----
                 _buildHeader(context, isDark),
 
                 // ---- 2. المحتوى والتفاصيل المنظمة ----
                 Flexible(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                    padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // كروت البيانات الأساسية (شبكية 3D)
+                        // كروت البيانات الأساسية (شبكية متوازنة 6 عناصر)
                         _buildInfoGrid(context, isDark),
 
                         const SizedBox(height: 16),
@@ -108,7 +259,7 @@ class PermitDetailScreen extends StatelessWidget {
                   ),
                 ),
 
-                // ---- 3. أزرار الإجراءات السفلية ----
+                // ---- 3. أزرار الإجراءات السفلية المطورة ----
                 _buildFooterActions(context, isDark),
               ],
             ),
@@ -120,19 +271,19 @@ class PermitDetailScreen extends StatelessWidget {
 
   Widget _buildHeader(BuildContext context, bool isDark) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      padding: const EdgeInsets.fromLTRB(20, 18, 18, 18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
-              ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
-              : [AppColors.primary, AppColors.primaryDark],
+              ? [const Color(0xFF1E3A5F), const Color(0xFF0F172A)]
+              : [const Color(0xFF1E4976), const Color(0xFF153456)],
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 8,
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 10,
             offset: const Offset(0, 3),
           ),
         ],
@@ -144,30 +295,85 @@ class PermitDetailScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               // باج رقم الإجازة والسنة
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.assignment_rounded, color: Colors.white, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      'إجازة رقم ${permit.permitYear} / ${permit.permitNumber}',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.32)),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.assignment_rounded, color: Colors.white, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'إجازة رقم ${permit.permitYear} / ${permit.permitNumber}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13.5,
+                            fontFamily: 'Cairo',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'عرض باركود الإجازة',
+                    child: InkWell(
+                      onTap: _showBarcodeDialog,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.qr_code_2_rounded, color: Colors.white, size: 15),
+                            SizedBox(width: 4),
+                            Text(
+                              'باركود',
+                              style: TextStyle(color: Colors.white, fontSize: 11.5, fontFamily: 'Cairo', fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Tooltip(
+                    message: 'نسخ بيانات الإجازة',
+                    child: InkWell(
+                      onTap: _copyPermitSummary,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                        ),
+                        child: const Icon(Icons.copy_rounded, color: Colors.white, size: 14),
+                      ),
+                    ),
+                  ),
+                ],
               ),
 
               // زر الإغلاق X
               IconButton(
+                tooltip: 'إغلاق',
                 icon: Container(
-                  padding: const EdgeInsets.all(4),
+                  padding: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
@@ -178,25 +384,53 @@ class PermitDetailScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           // اسم صاحب الإجازة
           Row(
             children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: Colors.white.withValues(alpha: 0.25),
-                child: const Icon(Icons.person_rounded, color: Colors.white, size: 26),
+              Container(
+                padding: const EdgeInsets.all(2.5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+                ),
+                child: CircleAvatar(
+                  radius: 23,
+                  backgroundColor: Colors.white.withValues(alpha: 0.22),
+                  child: const Icon(Icons.person_rounded, color: Colors.white, size: 27),
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
-                child: Text(
-                  permit.fullName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                    height: 1.2,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      permit.fullName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        fontFamily: 'Cairo',
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.verified_rounded, color: Color(0xFF4ADE80), size: 14),
+                        const SizedBox(width: 5),
+                        Text(
+                          'مديرية بلدية الهاشمية · وثيقة إجازة رسمية مسجلة',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontSize: 11.5,
+                            fontFamily: 'Cairo',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -210,6 +444,8 @@ class PermitDetailScreen extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth > 380;
+        final tileWidth = isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth;
+
         return Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -218,9 +454,9 @@ class PermitDetailScreen extends StatelessWidget {
               context,
               icon: Icons.grid_view_rounded,
               label: context.tr('plot_number'),
-              value: permit.plotNumber,
+              value: permit.plotNumber.isNotEmpty ? permit.plotNumber : '-',
               color: AppColors.primary,
-              width: isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth,
+              width: tileWidth,
             ),
             _infoTile(
               context,
@@ -228,7 +464,7 @@ class PermitDetailScreen extends StatelessWidget {
               label: context.tr('permit_date'),
               value: AppDateUtils.formatDate(permit.permitDate),
               color: AppColors.secondary,
-              width: isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth,
+              width: tileWidth,
             ),
             if (permit.permitType.isNotEmpty)
               _infoTile(
@@ -237,7 +473,7 @@ class PermitDetailScreen extends StatelessWidget {
                 label: context.tr('permit_type'),
                 value: permit.permitType,
                 color: AppColors.info,
-                width: isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth,
+                width: tileWidth,
               ),
             if (permit.plotArea != null)
               _infoTile(
@@ -246,7 +482,7 @@ class PermitDetailScreen extends StatelessWidget {
                 label: context.tr('plot_area'),
                 value: '${permit.plotArea} م²',
                 color: AppColors.accent,
-                width: isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth,
+                width: tileWidth,
               ),
             if (permit.buildingArea != null)
               _infoTile(
@@ -255,7 +491,7 @@ class PermitDetailScreen extends StatelessWidget {
                 label: context.tr('building_area'),
                 value: '${permit.buildingArea} م²',
                 color: AppColors.secondary,
-                width: isWide ? (constraints.maxWidth - 12) / 2 : constraints.maxWidth,
+                width: tileWidth,
               ),
           ],
         );
@@ -274,7 +510,7 @@ class PermitDetailScreen extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: width,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: isDark ? color.withValues(alpha: 0.12) : color.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(16),
@@ -285,7 +521,7 @@ class PermitDetailScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.2),
+              color: color.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: color, size: 22),
@@ -301,6 +537,7 @@ class PermitDetailScreen extends StatelessWidget {
                     fontSize: 11.5,
                     color: isDark ? Colors.grey[400] : Colors.grey[700],
                     fontWeight: FontWeight.w600,
+                    fontFamily: 'Cairo',
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -310,6 +547,7 @@ class PermitDetailScreen extends StatelessWidget {
                     fontSize: 14.5,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : Colors.black87,
+                    fontFamily: 'Cairo',
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -383,7 +621,7 @@ class PermitDetailScreen extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: color),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: color, fontFamily: 'Cairo'),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -392,6 +630,7 @@ class PermitDetailScreen extends StatelessWidget {
                     fontSize: 13.5,
                     height: 1.4,
                     color: isDark ? Colors.white70 : Colors.black87,
+                    fontFamily: 'Cairo',
                   ),
                 ),
               ],
@@ -425,6 +664,7 @@ class PermitDetailScreen extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
                   color: isDark ? Colors.grey[300] : Colors.grey[800],
+                  fontFamily: 'Cairo',
                 ),
               ),
             ],
@@ -437,7 +677,7 @@ class PermitDetailScreen extends StatelessWidget {
               Expanded(
                 child: Text(
                   'المُدخل: ${permit.createdByName ?? '-'} · ${AppDateUtils.formatDateTime(permit.createdAt)}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontFamily: 'Cairo'),
                 ),
               ),
             ],
@@ -450,7 +690,7 @@ class PermitDetailScreen extends StatelessWidget {
               Expanded(
                 child: Text(
                   'تعديل بواسطة: ${permit.updatedByName ?? '-'} · ${AppDateUtils.formatDateTime(permit.updatedAt)}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontFamily: 'Cairo'),
                 ),
               ),
             ],
@@ -475,12 +715,12 @@ class PermitDetailScreen extends StatelessWidget {
         children: [
           // زر تعديل الإجازة أو زر حسناً
           Expanded(
-            child: canEdit
+            child: widget.canEdit
                 ? ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       elevation: 2,
                     ),
@@ -493,7 +733,7 @@ class PermitDetailScreen extends StatelessWidget {
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontFamily: 'Cairo',
-                          fontSize: 12,
+                          fontSize: 13,
                         ),
                       ),
                     ),
@@ -508,7 +748,7 @@ class PermitDetailScreen extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       elevation: 2,
                     ),
@@ -521,7 +761,7 @@ class PermitDetailScreen extends StatelessWidget {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontFamily: 'Cairo',
-                          fontSize: 12,
+                          fontSize: 13,
                         ),
                       ),
                     ),
@@ -530,15 +770,21 @@ class PermitDetailScreen extends StatelessWidget {
           ),
           const SizedBox(width: 10),
 
-          // زر طباعة PDF
+          // زر تصدير / طباعة PDF
           Expanded(
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-                side: BorderSide(color: AppColors.primary.withValues(alpha: 0.5), width: 1.5),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                side: BorderSide(color: AppColors.primary.withValues(alpha: 0.6), width: 1.5),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              icon: const Icon(Icons.print_rounded, size: 18, color: AppColors.primary),
+              icon: _exportingPdf
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                    )
+                  : const Icon(Icons.print_rounded, size: 18, color: AppColors.primary),
               label: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
@@ -548,11 +794,44 @@ class PermitDetailScreen extends StatelessWidget {
                     color: AppColors.primary,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'Cairo',
-                    fontSize: 12,
+                    fontSize: 13,
                   ),
                 ),
               ),
-              onPressed: () => _printPermit(context),
+              onPressed: _exportingPdf ? null : _handleExportPdf,
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // زر طباعة الباركود وحده (منفصل عن ملف التفاصيل)
+          Expanded(
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                side: const BorderSide(color: Color(0xFF1FA2C4), width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: _printingBarcode
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1FA2C4)),
+                    )
+                  : const Icon(Icons.qr_code_2_rounded, size: 18, color: Color(0xFF1FA2C4)),
+              label: const FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'طباعة باركود',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: Color(0xFF1FA2C4),
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Cairo',
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              onPressed: _printingBarcode ? null : _handlePrintBarcode,
             ),
           ),
           const SizedBox(width: 10),
@@ -561,11 +840,17 @@ class PermitDetailScreen extends StatelessWidget {
           Expanded(
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-                side: BorderSide(color: AppColors.secondary.withValues(alpha: 0.5), width: 1.5),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                side: BorderSide(color: AppColors.secondary.withValues(alpha: 0.6), width: 1.5),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              icon: const Icon(Icons.table_view_rounded, size: 18, color: AppColors.secondary),
+              icon: _exportingExcel
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.secondary),
+                    )
+                  : const Icon(Icons.table_view_rounded, size: 18, color: AppColors.secondary),
               label: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
@@ -575,24 +860,16 @@ class PermitDetailScreen extends StatelessWidget {
                     color: AppColors.secondary,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'Cairo',
-                    fontSize: 12,
+                    fontSize: 13,
                   ),
                 ),
               ),
-              onPressed: () async {
-                final file = await ExcelService.instance.exportPermits([permit]);
-                await OpenFilex.open(file.path);
-              },
+              onPressed: _exportingExcel ? null : _handleExportExcel,
             ),
           ),
         ],
       ),
     );
-  }
-
-  Future<void> _printPermit(BuildContext context) async {
-    final file = await PdfService.instance.buildSinglePermitPdf(permit);
-    await OpenFilex.open(file.path);
   }
 
   Widget _buildAttachmentsSection(BuildContext context, bool isDark) {

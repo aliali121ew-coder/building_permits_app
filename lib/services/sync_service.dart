@@ -39,6 +39,7 @@ class SyncService {
 
   RealtimeChannel? _channel;
   StreamSubscription<bool>? _connSub;
+  Timer? _pollingTimer;
   bool _isSyncing = false;
 
   Future<void> start() async {
@@ -50,7 +51,9 @@ class SyncService {
     _connSub = ConnectivityService.instance.onlineStream.listen((online) {
       if (online) {
         _flushPendingThenPull();
+        _startPolling();
       } else {
+        _stopPolling();
         _statusController.add(SyncStatus.offline);
       }
     });
@@ -58,12 +61,28 @@ class SyncService {
     if (ConnectivityService.instance.isOnline) {
       _subscribeRealtime();
       await _flushPendingThenPull();
+      _startPolling();
     } else {
       _statusController.add(SyncStatus.offline);
     }
   }
 
+  void _startPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 25), (_) {
+      if (ConnectivityService.instance.isOnline) {
+        _flushPendingThenPull();
+      }
+    });
+  }
+
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
   void dispose() {
+    _stopPolling();
     _connSub?.cancel();
     _channel?.unsubscribe();
     _statusController.close();

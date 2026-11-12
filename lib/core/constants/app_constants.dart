@@ -2,6 +2,9 @@
 class AppConstants {
   AppConstants._();
 
+  // ---- Cloudflare Backend API ----
+  static const String backendApiUrl = 'https://building-permits-backend.aliali121ew.workers.dev';
+
   // ---- Supabase (تم الربط بمشروعك الحقيقي) ----
   static const String supabaseUrl = 'https://diorwiyawahunnozeoqc.supabase.co';
   static const String supabaseAnonKey = 'sb_publishable_pPj5yUCAAIYnubgxty7X0Q_wywAV5K2';
@@ -25,6 +28,14 @@ class AppConstants {
   // ---- أنواع الإجازة الشائعة (تُقترح تلقائياً، وتقبل نص حر أيضاً) ----
   static const List<String> permitTypes = [
     'اجازة جديدة',
+    'ملحق اجازة',
+    'تغيير مخططات',
+    'اضافة بناء طابق',
+    'طابقين',
+    'ثالث',
+    'تغيير اسم من القديم الى الجديد',
+    'هيكل مسقف',
+    'باتلو',
     'اضافة بناء',
     'بناء اضافي',
     'ترميم',

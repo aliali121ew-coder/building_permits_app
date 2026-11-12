@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'cloudflare_api_service.dart';
 import 'supabase_service.dart';
 
 /// معلومات إصدار متاح للتحديث
@@ -34,18 +36,13 @@ class UpdateService {
 
   /// يعيد معلومات التحديث إن وُجد إصدار أحدث من الحالي، وإلا null.
   Future<AppUpdateInfo?> checkForUpdate() async {
+    if (kIsWeb) return null; // في الويب، يتم التحديث فورياً عند فتح الرابط
     if (!SupabaseService.isConfigured) return null;
-    final client = SupabaseService.instance.client;
-    if (client == null) return null;
     try {
       final info = await PackageInfo.fromPlatform();
       final currentBuild = int.tryParse(info.buildNumber) ?? 0;
 
-      final row = await client
-          .from('app_updates')
-          .select()
-          .eq('platform', _platform)
-          .maybeSingle();
+      final row = await CloudflareApiService.instance.checkUpdate(_platform);
       if (row == null) return null;
 
       final latestBuild = (row['latest_build'] as num?)?.toInt() ?? 0;
@@ -57,7 +54,7 @@ class UpdateService {
           build: latestBuild,
           downloadUrl: url,
           releaseNotes: (row['release_notes'] as String?) ?? '',
-          mandatory: (row['mandatory'] as bool?) ?? false,
+          mandatory: (row['mandatory'] as bool? ?? (row['mandatory'] == 1)),
         );
       }
     } catch (_) {

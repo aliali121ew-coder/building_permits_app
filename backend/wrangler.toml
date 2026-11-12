@@ -1,0 +1,17 @@
+name = "building-permits-backend"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# JWT_SECRET لا يُكتب هنا. في الإنتاج: npx wrangler secret put JWT_SECRET
+# وللتشغيل المحلي: ضعه في ملف .dev.vars (مُستثنى من git)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "permits-db"
+database_id = "4f828e00-3cd5-4cba-ba0d-39543ab4ed06"
+
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "permit-attachments"
+

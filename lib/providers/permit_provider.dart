@@ -117,10 +117,15 @@ class PermitProvider extends ChangeNotifier {
 
     if (hasQuery) {
       final q = query.trim().toLowerCase();
+      final qNoSpaces = q.replaceAll(' ', '');
       results = results.where((p) {
+        final yearNum = '${p.permitYear}/${p.permitNumber}';
+        final numYear = '${p.permitNumber}/${p.permitYear}';
         return p.fullName.toLowerCase().contains(q) ||
             p.plotNumber.toLowerCase().contains(q) ||
             p.permitNumber.toString().contains(q) ||
+            yearNum.contains(qNoSpaces) ||
+            numYear.contains(qNoSpaces) ||
             p.notes.toLowerCase().contains(q) ||
             p.namePerNewRegistry.toLowerCase().contains(q) ||
             p.nameChangeNotes.toLowerCase().contains(q);

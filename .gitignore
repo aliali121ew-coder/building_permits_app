@@ -13,8 +13,20 @@ linux/flutter/ephemeral/
 macos/Flutter/ephemeral/
 *.g.dart
 
+# Key files
+*.jks
+key.properties
+android/key.properties
+
 # Kotlin build cache & error logs (build artifacts, not source)
 android/.kotlin/
 
 # Compressed archives should not be committed to the repo
 *.rar
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
