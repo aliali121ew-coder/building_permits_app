@@ -66,26 +66,24 @@ class _GlassCardState extends State<GlassCard> with SingleTickerProviderStateMix
           child: ClipRRect(
             borderRadius: BorderRadius.circular(widget.borderRadius),
             child: Container(
-                padding: widget.padding,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(widget.borderRadius),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      colors.first.withValues(alpha: isDark ? 0.55 : 1.0),
-                      colors.last.withValues(alpha: isDark ? 0.35 : 1.0),
-                    ],
-                  ),
-                  border: Border.all(
-                    color: isDark 
-                        ? Colors.white.withValues(alpha: 0.12) 
-                        : Colors.white.withValues(alpha: 0.75),
-                    width: isDark ? 1.2 : 2.2, // حواف ناعمة بارزة 3d
-                  ),
+              padding: widget.padding,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(widget.borderRadius),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    colors.first.withValues(alpha: isDark ? 0.55 : 1.0),
+                    colors.last.withValues(alpha: isDark ? 0.35 : 1.0),
+                  ],
                 ),
-                child: widget.child,
+                border: Border.all(
+                  color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.75),
+                  width: isDark ? 1.2 : 2.2, // حواف ناعمة بارزة 3d
+                ),
               ),
+              child: widget.child,
+            ),
           ),
         ),
       ),

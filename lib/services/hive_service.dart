@@ -90,6 +90,12 @@ class HiveService {
   String? getThemeMode() => _settingsBox.get(AppConstants.keyThemeMode) as String?;
   Future<void> setThemeMode(String mode) => _settingsBox.put(AppConstants.keyThemeMode, mode);
 
+  /// آخر إغلاق لشريط «تثبيت التطبيق» (لا يظهر مجدداً قبل 3 أيام)
+  DateTime? getInstallBannerDismissedAt() =>
+      DateTime.tryParse(_settingsBox.get('install_banner_dismissed_at') as String? ?? '');
+  Future<void> setInstallBannerDismissedAt(DateTime t) =>
+      _settingsBox.put('install_banner_dismissed_at', t.toIso8601String());
+
 
   DateTime? getLastSyncAt() {
     final raw = _settingsBox.get(AppConstants.keyLastSyncAt) as String?;

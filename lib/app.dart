@@ -6,7 +6,9 @@ import 'providers/auth_provider.dart';
 import 'providers/permit_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/splash/splash_screen.dart';
+import 'core/navigation.dart';
 import 'widgets/app_update_gate.dart';
+import 'widgets/install_banner.dart';
 import 'widgets/remote_change_listener.dart';
 
 class BuildingPermitsApp extends StatelessWidget {
@@ -23,6 +25,7 @@ class BuildingPermitsApp extends StatelessWidget {
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {
           return MaterialApp(
+            navigatorKey: rootNavigatorKey,
             title: 'الاجازات',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.light,
@@ -36,8 +39,10 @@ class BuildingPermitsApp extends StatelessWidget {
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
             ],
-            builder: (context, child) => AppUpdateGate(
-              child: RemoteChangeListener(child: child ?? const SizedBox.shrink()),
+            builder: (context, child) => InstallBanner(
+              child: AppUpdateGate(
+                child: RemoteChangeListener(child: child ?? const SizedBox.shrink()),
+              ),
             ),
             home: const SplashScreen(),
           );

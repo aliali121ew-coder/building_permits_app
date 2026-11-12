@@ -54,6 +54,33 @@
     <div class="bar"></div>
   </div>
   <script>
+    // ---- تثبيت التطبيق (PWA): نلتقط عرض التثبيت مبكراً قبل تحميل Flutter ----
+    var deferredInstall = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferredInstall = e;
+      window.dispatchEvent(new Event('pwa-installable'));
+    });
+    window.addEventListener('appinstalled', function () {
+      deferredInstall = null;
+      window.dispatchEvent(new Event('pwa-installed'));
+    });
+    window.pwaCanInstall = function () { return !!deferredInstall; };
+    window.pwaIsStandalone = function () {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    };
+    window.pwaIsIOS = function () {
+      return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    };
+    window.pwaInstall = function () {
+      if (!deferredInstall) return Promise.resolve('unavailable');
+      var p = deferredInstall;
+      deferredInstall = null;
+      p.prompt();
+      return p.userChoice.then(function (r) { return r.outcome; });
+    };
+
     window.addEventListener('flutter-first-frame', function () {
       var s = document.getElementById('splash');
       if (!s) return;
