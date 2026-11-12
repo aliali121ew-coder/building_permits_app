@@ -1,4 +1,4 @@
-﻿import { Hono } from 'hono';
+import { Hono } from 'hono';
 import { sign } from 'hono/jwt';
 import { Env, Profile, UserPayload } from '../types';
 import { hashPassword, verifyPassword } from '../utils/crypto';
@@ -20,12 +20,12 @@ export function formatProfile(p: any) {
   };
 }
 
-// 1) Ø¥Ù†Ø´Ø§Ø¡ Ø­Ø³Ø§Ø¨ Ø¬Ø¯ÙŠØ¯ (Sign Up)
+// 1) إنشاء حساب جديد (Sign Up)
 auth.post('/register', async (c) => {
   const { email, password, full_name } = await c.req.json();
 
   if (!email || !password || !full_name) {
-    return c.json({ error: 'Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ ÙˆÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± ÙˆØ§Ù„Ø§Ø³Ù… Ø§Ù„Ø«Ù„Ø§Ø«ÙŠ Ù…Ø·Ù„ÙˆØ¨Ø©' }, 400);
+    return c.json({ error: 'البريد الإلكتروني وكلمة المرور والاسم الثلاثي مطلوبة' }, 400);
   }
 
   const cleanEmail = email.toLowerCase().trim();
@@ -34,10 +34,10 @@ auth.post('/register', async (c) => {
     .first();
 
   if (existing) {
-    return c.json({ error: 'Ù‡Ø°Ø§ Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ Ù…Ø³Ø¬Ù„ Ù…Ø³Ø¨Ù‚Ø§Ù‹' }, 400);
+    return c.json({ error: 'هذا البريد الإلكتروني مسجل مسبقاً' }, 400);
   }
 
-  // Ø§Ù„ØªØ­Ù‚Ù‚ Ø¥Ù† ÙƒØ§Ù† Ù‡Ø°Ø§ Ø£ÙˆÙ„ Ù…Ø³ØªØ®Ø¯Ù… Ø£Ùˆ Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø±Ø³Ù…ÙŠ Ù„Ù„Ù…Ø¯ÙŠØ±
+  // التحقق إن كان هذا أول مستخدم أو البريد الرسمي للمدير
   const countResult = await c.env.DB.prepare('SELECT count(*) as count FROM profiles').first<{ count: number }>();
   const isFirstUser = (countResult?.count ?? 0) === 0 || cleanEmail === 'see313see@gmail.com';
 
@@ -73,12 +73,12 @@ auth.post('/register', async (c) => {
   return c.json({ token, user: formatProfile(profile) }, 201);
 });
 
-// 2) ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„ (Sign In)
+// 2) تسجيل الدخول (Sign In)
 auth.post('/login', async (c) => {
   const { email, password } = await c.req.json();
 
   if (!email || !password) {
-    return c.json({ error: 'ÙŠØ±Ø¬Ù‰ Ø¥Ø¯Ø®Ø§Ù„ Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ ÙˆÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ±' }, 400);
+    return c.json({ error: 'يرجى إدخال البريد الإلكتروني وكلمة المرور' }, 400);
   }
 
   const profile = await c.env.DB.prepare('SELECT * FROM profiles WHERE email = ?')
@@ -86,12 +86,12 @@ auth.post('/login', async (c) => {
     .first<Profile>();
 
   if (!profile || !profile.password_hash) {
-    return c.json({ error: 'Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ Ø£Ùˆ ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± ØºÙŠØ± ØµØ­ÙŠØ­Ø©' }, 401);
+    return c.json({ error: 'البريد الإلكتروني غير مسجل' }, 401);
   }
 
   const valid = await verifyPassword(password, profile.password_hash);
   if (!valid) {
-    return c.json({ error: 'Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ Ø£Ùˆ ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± ØºÙŠØ± ØµØ­ÙŠØ­Ø©' }, 401);
+    return c.json({ error: 'كلمة المرور خطأ' }, 401);
   }
 
   const token = await sign(
@@ -102,25 +102,25 @@ auth.post('/login', async (c) => {
   return c.json({ token, user: formatProfile(profile) });
 });
 
-// 3) Ø¬Ù„Ø¨ Ø§Ù„Ù…Ù„Ù Ø§Ù„Ø´Ø®ØµÙŠ Ù„Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø§Ù„Ø­Ø§Ù„ÙŠ (Me)
+// 3) جلب الملف الشخصي للمستخدم الحالي (Me)
 auth.get('/me', authMiddleware, async (c) => {
   const user = c.get('user');
   const profile = await c.env.DB.prepare('SELECT * FROM profiles WHERE id = ?')
     .bind(user.id)
     .first<Profile>();
 
-  if (!profile) return c.json({ error: 'Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯' }, 404);
+  if (!profile) return c.json({ error: 'المستخدم غير موجود' }, 404);
 
   return c.json(formatProfile(profile));
 });
 
-// 4) ØªØºÙŠÙŠØ± ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ±
+// 4) تغيير كلمة المرور
 auth.post('/change-password', authMiddleware, async (c) => {
   const user = c.get('user');
   const { old_password, new_password } = await c.req.json();
 
   if (!new_password || new_password.length < 6) {
-    return c.json({ error: 'ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø© ÙŠØ¬Ø¨ Ø£Ù† Ù„Ø§ ØªÙ‚Ù„ Ø¹Ù† 6 Ø£Ø­Ø±Ù' }, 400);
+    return c.json({ error: 'كلمة المرور الجديدة يجب أن لا تقل عن 6 أحرف' }, 400);
   }
 
   if (old_password) {
@@ -129,7 +129,7 @@ auth.post('/change-password', authMiddleware, async (c) => {
       .first<{ password_hash: string }>();
 
     if (!profile || !await verifyPassword(old_password, profile.password_hash)) {
-      return c.json({ error: 'ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø§Ù„Ø­Ø§Ù„ÙŠØ© ØºÙŠØ± ØµØ­ÙŠØ­Ø©' }, 400);
+      return c.json({ error: 'كلمة المرور الحالية غير صحيحة' }, 400);
     }
   }
 
@@ -138,7 +138,7 @@ auth.post('/change-password', authMiddleware, async (c) => {
     .bind(newHash, user.id)
     .run();
 
-  return c.json({ message: 'ØªÙ… ØªØºÙŠÙŠØ± ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø¨Ù†Ø¬Ø§Ø­' });
+  return c.json({ message: 'تم تغيير كلمة المرور بنجاح' });
 });
 
 export default auth;
