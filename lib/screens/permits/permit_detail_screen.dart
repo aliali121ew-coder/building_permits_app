@@ -2,8 +2,8 @@ import 'package:barcode/barcode.dart' as bc;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:open_filex/open_filex.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/utils/attachment_storage.dart';
 import '../../core/utils/date_utils.dart';
 import '../../l10n/app_strings.dart';
@@ -65,7 +65,7 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
 
   void _showBarcodeDialog() {
     final qrSvg = bc.Barcode.qrCode().toSvg(
-      'PERMIT:${permit.permitYear}/${permit.permitNumber}',
+      AppConstants.permitLink(permit.permitYear, permit.permitNumber),
       width: 200,
       height: 200,
       drawText: false,

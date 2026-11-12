@@ -5,6 +5,12 @@ class AppConstants {
   // ---- Cloudflare Backend API ----
   static const String backendApiUrl = 'https://building-permits-backend.aliali121ew.workers.dev';
 
+  // ---- رابط تطبيق الويب (يُطبع داخل باركود الإجازة) ----
+  static const String webAppUrl = 'https://building-permits-app.aliali121ew.workers.dev';
+
+  /// محتوى باركود الإجازة: رابط يفتح التطبيق على تفاصيلها مباشرة عند مسحه بكاميرا الهاتف
+  static String permitLink(int year, int number) => '$webAppUrl/#p=$year/$number';
+
   // ---- صناديق Hive المحلية ----
   static const String hivePermitsBox = 'permits_box';
   static const String hivePendingOpsBox = 'pending_ops_box';

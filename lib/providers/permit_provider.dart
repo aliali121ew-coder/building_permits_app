@@ -239,6 +239,50 @@ class PermitProvider extends ChangeNotifier {
 
   Future<void> forceSync() => _sync.syncNow();
 
+  /// يحوّل محتوى باركود (رابط الإجازة، أو PERMIT:سنة/رقم القديم، أو رقم/قطعة) إلى إجازة محلية
+  PermitModel? findByCode(String rawCode) {
+    var cleaned = rawCode.trim();
+    if (cleaned.isEmpty) return null;
+
+    // رابط التطبيق: https://…/#p=2026/77
+    final link = RegExp(r'[#?&]p=([^&#\s]+)').firstMatch(cleaned);
+    if (link != null) cleaned = Uri.decodeComponent(link.group(1)!);
+
+    if (cleaned.toUpperCase().startsWith('PERMIT:')) cleaned = cleaned.substring(7).trim();
+    if (cleaned.contains('|')) cleaned = cleaned.split('|').first.trim();
+
+    // سنة/رقم (2026/77 أو 77/2026)
+    final normalized = cleaned.replaceAll(' ', '');
+    final parts = normalized.split('/');
+    if (parts.length == 2) {
+      final a = int.tryParse(parts[0]);
+      final b = int.tryParse(parts[1]);
+      if (a != null && b != null) {
+        final year = a >= 1900 ? a : b;
+        final num = a >= 1900 ? b : a;
+        for (final p in _permits) {
+          if (p.permitYear == year && p.permitNumber == num) return p;
+        }
+        if (link != null) return null; // رابط إجازة محددة: لا نخمّن غيرها
+      }
+    }
+
+    final lower = cleaned.toLowerCase();
+    for (final p in _permits) {
+      if (p.id.toLowerCase() == lower || p.plotNumber.toLowerCase() == lower) return p;
+    }
+
+    final asInt = int.tryParse(cleaned);
+    if (asInt != null) {
+      for (final p in _permits) {
+        if (p.permitNumber == asInt) return p;
+      }
+    }
+
+    final matches = search(query: cleaned);
+    return matches.isEmpty ? null : matches.first;
+  }
+
   @override
   void dispose() {
     _refreshDebounce?.cancel();

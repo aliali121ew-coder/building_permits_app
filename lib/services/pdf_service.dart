@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
+import '../core/constants/app_constants.dart';
 import '../models/permit_model.dart';
 import '../core/utils/attachment_storage.dart';
 import '../core/utils/date_utils.dart';
@@ -174,7 +175,7 @@ class PdfService {
   static const _line = PdfColor.fromInt(0xFFD5DEE8);
 
   /// نص رمز QR — يقرؤه ماسح التطبيق ويفتح بطاقة الإجازة مباشرة
-  String _qrData(PermitModel p) => 'PERMIT:${p.permitYear}/${p.permitNumber}';
+  String _qrData(PermitModel p) => AppConstants.permitLink(p.permitYear, p.permitNumber);
 
   String _fmtArea(double? v) {
     if (v == null) return '-';

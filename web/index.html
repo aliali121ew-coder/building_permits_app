@@ -80,6 +80,16 @@
       return p.userChoice.then(function (r) { return r.outcome; });
     };
 
+    // ---- باركود الإجازة: الرابط …/#p=2026/77 يفتح تفاصيلها بعد تسجيل الدخول ----
+    var permitLink = '';
+    (function () {
+      var m = location.hash.match(/^#p=([^&]+)/);
+      if (!m) return;
+      permitLink = decodeURIComponent(m[1]);
+      history.replaceState(null, '', location.pathname + location.search);
+    })();
+    window.takePermitLink = function () { var v = permitLink; permitLink = ''; return v; };
+
     window.addEventListener('flutter-first-frame', function () {
       var s = document.getElementById('splash');
       if (!s) return;

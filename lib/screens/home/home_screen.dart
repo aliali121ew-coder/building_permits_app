@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/platform/permit_link.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/permit_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -16,6 +17,7 @@ import '../../widgets/admin_gate.dart';
 import '../../widgets/user_avatar.dart';
 import '../admin/licensing_screen.dart';
 import '../auth/login_screen.dart';
+import '../permits/permit_detail_screen.dart';
 import '../permits/permit_form_screen.dart';
 import '../permits/permit_list_screen.dart';
 import '../search/barcode_scanner_screen.dart';
@@ -74,8 +76,37 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<PermitProvider>().init();
+        _openPermitFromLink();
       }
     });
+  }
+
+  /// فُتح التطبيق من باركود إجازة بكاميرا الهاتف: نعرض تفاصيلها مباشرة
+  Future<void> _openPermitFromLink() async {
+    final code = takePendingPermitLink();
+    if (code == null) return;
+    final auth = context.read<AuthProvider>();
+    if (!(auth.user?.canView ?? true)) return;
+    final provider = context.read<PermitProvider>();
+    var permit = provider.findByCode('#p=$code');
+    if (permit == null) {
+      // إجازة جديدة لم تصل بعد لهذا الجهاز: مزامنة سريعة ثم إعادة المحاولة
+      try {
+        await provider.forceSync();
+      } catch (_) {}
+      if (!mounted) return;
+      permit = provider.findByCode('#p=$code');
+    }
+    if (!mounted) return;
+    if (permit == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('لم يتم العثور على الإجازة $code', style: const TextStyle(fontFamily: 'Cairo')),
+        backgroundColor: AppColors.danger,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    await PermitDetailScreen.show(context, permit, canEdit: auth.user?.canEdit ?? true);
   }
 
   @override
@@ -90,7 +121,12 @@ class _HomeScreenState extends State<HomeScreen> {
       (hasView && (auth.user?.canAdd ?? true))
           ? const PermitFormScreen()
           : _buildLockedView(context, auth, isAddOnly: true), // 1: اضافة
-      hasView ? const BarcodeScannerScreen() : _buildLockedView(context, auth), // 2: باركود
+      // الكاميرا تعمل فقط والتبويب مفتوح (لا تُشغَّل مخفية عند فتح التطبيق)
+      !hasView
+          ? _buildLockedView(context, auth)
+          : _currentIndex == 2
+              ? const BarcodeScannerScreen()
+              : const SizedBox.shrink(), // 2: باركود
       const SettingsScreen(), // 3: الاعدادات
     ];
 

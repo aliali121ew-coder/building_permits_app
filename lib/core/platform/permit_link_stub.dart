@@ -1,0 +1,1 @@
+String? takePendingPermitLink() => null;

@@ -16,3 +16,5 @@
   Cache-Control: public, max-age=604800
 /canvaskit/*
   Cache-Control: public, max-age=604800
+/zxing/*
+  Cache-Control: public, max-age=604800

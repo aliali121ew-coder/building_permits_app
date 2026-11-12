@@ -1,8 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
-import '../../models/permit_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/permit_provider.dart';
 import '../permits/permit_detail_screen.dart';
@@ -22,6 +22,13 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   );
   final TextEditingController _manualCtrl = TextEditingController();
   bool _isShowingDetail = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // في المتصفحات بلا قارئ مدمج (iPhone / ويندوز) تُحمَّل مكتبة القراءة من موقعنا لا من CDN خارجي
+    if (kIsWeb) MobileScannerPlatform.instance.setBarcodeLibraryScriptUrl('zxing/reader.js');
+  }
   bool _torchEnabled = false;
   String? _lastScannedRaw;
 
@@ -32,53 +39,6 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     super.dispose();
   }
 
-  PermitModel? _resolvePermitFromCode(String rawCode, PermitProvider provider) {
-    var cleaned = rawCode.trim();
-    if (cleaned.isEmpty) return null;
-
-    if (cleaned.toUpperCase().startsWith('PERMIT:')) {
-      cleaned = cleaned.substring(7).trim();
-    }
-    if (cleaned.contains('|')) {
-      cleaned = cleaned.split('|').first.trim();
-    }
-
-    // 1. مطابقة صيغة سنة/رقم (مثال: 2026/77 أو 77/2026)
-    final normalized = cleaned.replaceAll(' ', '');
-    if (normalized.contains('/')) {
-      final parts = normalized.split('/');
-      if (parts.length == 2) {
-        final a = int.tryParse(parts[0]);
-        final b = int.tryParse(parts[1]);
-        if (a != null && b != null) {
-          final year = a >= 1900 ? a : b;
-          final num = a >= 1900 ? b : a;
-          final exact = provider.permits.where((p) => p.permitYear == year && p.permitNumber == num);
-          if (exact.isNotEmpty) return exact.first;
-        }
-      }
-    }
-
-    // 2. مطابقة المعرف الفريد ID أو رقم القطعة الدقيق
-    final byIdOrPlot = provider.permits.where(
-      (p) => p.id.toLowerCase() == cleaned.toLowerCase() || p.plotNumber.toLowerCase() == cleaned.toLowerCase(),
-    );
-    if (byIdOrPlot.isNotEmpty) return byIdOrPlot.first;
-
-    // 3. مطابقة رقم الإجازة المباشر (الأحدث أولاً)
-    final asInt = int.tryParse(cleaned);
-    if (asInt != null) {
-      final byNumber = provider.permits.where((p) => p.permitNumber == asInt);
-      if (byNumber.isNotEmpty) return byNumber.first;
-    }
-
-    // 4. بحث عام في الحقول
-    final searchMatches = provider.search(query: cleaned);
-    if (searchMatches.isNotEmpty) return searchMatches.first;
-
-    return null;
-  }
-
   Future<void> _handleCodeDetected(String rawValue) async {
     if (_isShowingDetail) return;
     final code = rawValue.trim();
@@ -86,7 +46,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
     final provider = context.read<PermitProvider>();
     final auth = context.read<AuthProvider>();
-    final matchedPermit = _resolvePermitFromCode(code, provider);
+    final matchedPermit = provider.findByCode(code);
 
     setState(() {
       _isShowingDetail = true;
