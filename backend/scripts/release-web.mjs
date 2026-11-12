@@ -1,17 +1,21 @@
 // نشر تطبيق الويب (PWA) على Cloudflare بأمر واحد:
-//   node scripts/release-web.mjs      (من مجلد backend)
+//   node backend/scripts/release-web.mjs      (من مجلد المشروع)
 //
 // - محرك العرض (CanvasKit) يُخدم من خادمك نفسه بدل Google CDN،
 //   فيُحفظ في الجهاز ويفتح التطبيق بدون إنترنت.
 // - Service Worker (offline-first) يحفظ ملفات التطبيق بعد أول فتح.
 // - بعد النشر: من يفتح التطبيق يرى عدّاد 5 ثوانٍ ثم يتحدّث تلقائياً.
 
-import { execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-const isWin = process.platform === 'win32';
-const run = (cmd, args) => execFileSync(cmd, args, { cwd: ROOT, stdio: 'inherit', shell: isWin });
+// أمر نصي واحد (وسائط ثابتة بلا مسافات) — يعمل على ويندوز بدون تحذير DEP0190
+const run = (cmd, args) => execSync([cmd, ...args].join(' '), { cwd: ROOT, stdio: 'inherit' });
+
+// كاش البناء القديم قد يحتفظ بحزم محذوفة فيفشل البناء
+rmSync(resolve(ROOT, '.dart_tool', 'flutter_build'), { recursive: true, force: true });
 
 console.log('\nبناء تطبيق الويب ...');
 run('flutter', ['build', 'web', '--release', '--no-web-resources-cdn', '--pwa-strategy=offline-first']);

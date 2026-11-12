@@ -290,21 +290,6 @@ class CloudflareApiService {
       'message': message,
     }));
   }
-
-  // ===================== التحديثات (App Updates) =====================
-
-  Future<Map<String, dynamic>?> checkUpdate(String platform) async {
-    try {
-      final res = await _call(() => _dio.get('/api/updates/check/$platform'));
-      return Map<String, dynamic>.from(res.data);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> setUpdateInfo(Map<String, dynamic> data) async {
-    await _call(() => _dio.post('/api/updates/set', data: data));
-  }
 }
 
 

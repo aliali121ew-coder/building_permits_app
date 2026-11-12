@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -112,6 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (_) => themeProvider.toggle(context),
             ),
           ),
+          if (kIsWeb)
           Card(
             child: ListTile(
               leading: const Icon(Icons.system_update_rounded, color: AppColors.info),
