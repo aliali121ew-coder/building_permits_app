@@ -54,13 +54,15 @@ class AuthProvider extends ChangeNotifier {
           {required String fullName,
           String? birthDate,
           String? phoneNumber,
-          String? avatarPath}) =>
+          String? avatarPath,
+          Uint8List? avatarBytes}) =>
       _run<bool>(() async {
         await _auth.updateUserProfile(
             fullName: fullName,
             birthDate: birthDate,
             phoneNumber: phoneNumber,
-            avatarPath: avatarPath);
+            avatarPath: avatarPath,
+            avatarBytes: avatarBytes);
         _user = _auth.currentUser;
         return true;
       }, fallback: false);

@@ -1,7 +1,10 @@
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import '../platform/page_reload.dart';
 
 /// تخزين دائم للمرفقات (صور/PDF).
 ///
@@ -58,5 +61,48 @@ class AttachmentStorage {
       result.add(await persist(path));
     }
     return result;
+  }
+
+  static bool isRemote(String path) => path.startsWith('http://') || path.startsWith('https://');
+
+  /// اسم مقروء للمرفق (روابط الخادم تبدأ بمعرّف عشوائي: <uuid>_name.pdf)
+  static String displayName(String path) {
+    var name = path.split('/').last.split('\\').last;
+    try {
+      name = Uri.decodeComponent(name);
+    } catch (_) {}
+    final m = RegExp(r'^[0-9a-fA-F-]{36}_(.+)$').firstMatch(name);
+    return m?.group(1) ?? name;
+  }
+
+  /// بايتات المرفق من الخادم أو من الجهاز (null إن تعذر)
+  static Future<Uint8List?> readBytes(String path) async {
+    try {
+      if (isRemote(path)) {
+        final res = await Dio().get<List<int>>(path, options: Options(responseType: ResponseType.bytes));
+        return res.data == null ? null : Uint8List.fromList(res.data!);
+      }
+      if (kIsWeb) return null;
+      final f = File(path);
+      return f.existsSync() ? await f.readAsBytes() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// فتح المرفق: في المتصفح بتبويب جديد، وعلى الهاتف/الكمبيوتر بالتطبيق المناسب
+  static Future<void> open(String path) async {
+    if (isRemote(path)) {
+      if (kIsWeb) {
+        openInNewTab(path);
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final local = p.join(dir.path, displayName(path));
+      if (!File(local).existsSync()) await Dio().download(path, local);
+      path = local;
+    }
+    final result = await OpenFilex.open(path);
+    if (result.type != ResultType.done) throw Exception(result.message);
   }
 }

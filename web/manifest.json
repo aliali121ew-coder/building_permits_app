@@ -1,12 +1,16 @@
 {
+    "id": "./",
     "name": "نظام إدارة إجازات البناء",
     "short_name": "إجازات البناء",
-    "start_url": ".",
+    "description": "نظام إدارة إجازات البناء - مديرية بلدية الهاشمية",
+    "lang": "ar",
+    "dir": "rtl",
+    "start_url": "./",
+    "scope": "./",
     "display": "standalone",
-    "background_color": "#0D9488",
-    "theme_color": "#0D9488",
-    "description": "نظام إدارة إجازات البناء المؤسسي",
     "orientation": "any",
+    "background_color": "#1B3D5E",
+    "theme_color": "#1B3D5E",
     "prefer_related_applications": false,
     "icons": [
         {

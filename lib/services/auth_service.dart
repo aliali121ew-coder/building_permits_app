@@ -89,12 +89,20 @@ class AuthService {
     String? birthDate,
     String? phoneNumber,
     String? avatarPath,
+    Uint8List? avatarBytes,
   }) async {
     if (_currentUser == null) return;
     // صورة جديدة من الجهاز ← تُرفع إلى R2 كي يراها المدير من أي جهاز
     // (وأيضاً أي صورة قديمة محفوظة محلياً فقط تُرفع مرة واحدة)
     String? avatar = avatarPath;
-    if (avatar != null && !avatar.startsWith('http')) {
+    if (avatarBytes != null) {
+      // المتصفح: الصورة تصل كبايتات مباشرة
+      avatar = await _api.uploadAttachment(
+        permitId: 'avatars',
+        fileName: 'avatar_${_currentUser!.id}.png',
+        bytes: avatarBytes,
+      );
+    } else if (avatar != null && !avatar.startsWith('http')) {
       final file = File(avatar);
       avatar = (kIsWeb || !file.existsSync()) ? null : await _api.uploadAttachment(
         permitId: 'avatars',
@@ -139,11 +147,17 @@ class AuthService {
   Future<void> _cache(UserModel user) => _hive.setCachedUser(user.toMap());
 
   Future<void> _registerCurrentDevice() async {
-    if (_currentUser == null || kIsWeb) return;
+    if (_currentUser == null) return;
     try {
       final info = DeviceInfoPlugin();
       String id, name, platform;
-      if (Platform.isAndroid) {
+      if (kIsWeb) {
+        // المتصفح: معرّف ثابت يُولَّد مرة واحدة ويُحفظ (يُحسب ضمن حد الجهازين)
+        id = _hive.webDeviceId();
+        final b = await info.webBrowserInfo;
+        name = '${b.browserName.name} • ${b.platform ?? 'Web'}';
+        platform = 'Web';
+      } else if (Platform.isAndroid) {
         final d = await info.androidInfo;
         id = d.id;
         name = '${d.manufacturer} ${d.model}';

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:open_filex/open_filex.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/utils/attachment_storage.dart';
 import '../../core/utils/date_utils.dart';
 import '../../l10n/app_strings.dart';
 import '../../models/permit_model.dart';
@@ -961,7 +962,7 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
         ...permit.attachmentUrls.asMap().entries.map((entry) {
           final path = entry.value;
           final isPdf = path.toLowerCase().endsWith('.pdf');
-          final fileName = path.split('/').last.split('\\').last;
+          final fileName = AttachmentStorage.displayName(path);
 
           return Container(
             margin: const EdgeInsets.only(bottom: 8),
@@ -991,7 +992,7 @@ class _PermitDetailScreenState extends State<PermitDetailScreen> {
               onTap: () async {
                 final messenger = ScaffoldMessenger.of(context);
                 try {
-                  await OpenFilex.open(path);
+                  await AttachmentStorage.open(path);
                 } catch (_) {
                   messenger.showSnackBar(
                     const SnackBar(content: Text('تعذر فتح الملف المرفق')),

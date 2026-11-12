@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, Uint8List;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +13,7 @@ import '../../l10n/app_strings.dart';
 import '../../models/permit_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/permit_provider.dart';
+import '../../services/cloudflare_api_service.dart';
 import '../../widgets/professional_back_button.dart';
 import '../../widgets/tab_switch_notification.dart';
 
@@ -55,6 +56,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
 
   // قائمة مسارات المرفقات المحملة (PDF وصور)
   final List<String> _attachmentPaths = [];
+  bool _uploadingAttachment = false;
 
   @override
   void initState() {
@@ -130,40 +132,50 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
     super.dispose();
   }
 
+  /// رفع مرفق إلى الخادم (R2) كي يظهر على كل الأجهزة والمتصفح.
+  /// بدون إنترنت على الهاتف/الكمبيوتر يُحفظ محلياً كحل احتياطي.
+  Future<void> _addAttachment({required String name, Uint8List? bytes, String? localPath}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    void say(String m) => messenger.showSnackBar(SnackBar(content: Text(m, style: const TextStyle(fontFamily: 'Cairo'))));
+
+    final data = bytes ?? (localPath != null && !kIsWeb ? await File(localPath).readAsBytes() : null);
+    if (data == null) return;
+    if (data.length > 5 * 1024 * 1024) {
+      say('حجم المرفق يتجاوز الحد الأقصى المسموح به (5 ميجابايت)');
+      return;
+    }
+    setState(() => _uploadingAttachment = true);
+    try {
+      final url = await CloudflareApiService.instance.uploadAttachment(
+        permitId: widget.existing?.id ?? 'new',
+        fileName: name,
+        bytes: data,
+      );
+      if (mounted) setState(() => _attachmentPaths.add(url));
+    } catch (_) {
+      if (!kIsWeb && localPath != null) {
+        final saved = await AttachmentStorage.persist(localPath);
+        if (mounted) setState(() => _attachmentPaths.add(saved));
+        say('لا يوجد اتصال: حُفظ المرفق على هذا الجهاز فقط');
+      } else {
+        say('رفع المرفق يحتاج اتصالاً بالإنترنت');
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingAttachment = false);
+    }
+  }
+
   /// التقاط اختيار ملف PDF
   Future<void> _pickPdf() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
+        withData: kIsWeb,
       );
-      if (result != null && result.files.isNotEmpty) {
-        final picked = result.files.single;
-        if (kIsWeb) {
-          setState(() {
-            _attachmentPaths.add(picked.name);
-          });
-          return;
-        }
-        if (picked.path != null) {
-          final path = picked.path!;
-          final file = File(path);
-          final sizeInBytes = await file.length();
-          final sizeInMb = sizeInBytes / (1024 * 1024);
-          if (sizeInMb > 5.0) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('حجم المرفق يتجاوز الحد الأقصى المسموح به (5 ميجابايت)')),
-            );
-            return;
-          }
-          final savedPath = await AttachmentStorage.persist(path);
-          if (!mounted) return;
-          setState(() {
-            _attachmentPaths.add(savedPath);
-          });
-        }
-      }
+      if (result == null || result.files.isEmpty) return;
+      final picked = result.files.single;
+      await _addAttachment(name: picked.name, bytes: picked.bytes, localPath: kIsWeb ? null : picked.path);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -176,11 +188,10 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
   Future<void> _pickImage() async {
     if (kIsWeb) {
       try {
-        final result = await FilePicker.platform.pickFiles(type: FileType.image);
+        final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
         if (result != null && result.files.isNotEmpty) {
-          setState(() {
-            _attachmentPaths.add(result.files.single.name);
-          });
+          final f = result.files.single;
+          await _addAttachment(name: f.name, bytes: f.bytes);
         }
       } catch (_) {}
       return;
@@ -288,27 +299,11 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
         maxWidth: 1200,
       );
       if (photo != null) {
-        if (kIsWeb) {
-          setState(() {
-            _attachmentPaths.add(photo.name);
-          });
-          return;
-        }
-        final file = File(photo.path);
-        final sizeInBytes = await file.length();
-        final sizeInMb = sizeInBytes / (1024 * 1024);
-        if (sizeInMb > 5.0) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('حجم المرفق يتجاوز الحد الأقصى المسموح به (5 ميجابايت)')),
-          );
-          return;
-        }
-        final savedPath = await AttachmentStorage.persist(photo.path);
-        if (!mounted) return;
-        setState(() {
-          _attachmentPaths.add(savedPath);
-        });
+        await _addAttachment(
+          name: photo.name,
+          bytes: kIsWeb ? await photo.readAsBytes() : null,
+          localPath: kIsWeb ? null : photo.path,
+        );
       }
     } catch (_) {
       if (!mounted) return;
@@ -1283,7 +1278,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                   fit: BoxFit.scaleDown,
                   child: Text('إضافة ملف PDF', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Cairo')),
                 ),
-                onPressed: _pickPdf,
+                onPressed: _uploadingAttachment ? null : _pickPdf,
               ),
             ),
             const SizedBox(width: 8),
@@ -1299,11 +1294,17 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
                   fit: BoxFit.scaleDown,
                   child: Text('إضافة صورة', style: TextStyle(color: AppColors.secondary, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Cairo')),
                 ),
-                onPressed: _pickImage,
+                onPressed: _uploadingAttachment ? null : _pickImage,
               ),
             ),
           ],
         ),
+        if (_uploadingAttachment) ...[
+          const SizedBox(height: 10),
+          const LinearProgressIndicator(),
+          const SizedBox(height: 4),
+          const Text('جارٍ رفع المرفق…', style: TextStyle(fontSize: 11.5, color: Colors.grey, fontFamily: 'Cairo')),
+        ],
         const SizedBox(height: 12),
         if (_attachmentPaths.isEmpty)
           Container(
@@ -1332,7 +1333,7 @@ class _PermitFormScreenState extends State<PermitFormScreen> {
               final idx = entry.key;
               final path = entry.value;
               final isPdf = path.toLowerCase().endsWith('.pdf');
-              final fileName = path.split('/').last.split('\\').last;
+              final fileName = AttachmentStorage.displayName(path);
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),

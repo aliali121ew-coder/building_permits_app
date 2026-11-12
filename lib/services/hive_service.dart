@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../core/constants/app_constants.dart';
 import '../models/permit_model.dart';
 import '../models/pending_operation.dart';
@@ -137,6 +138,16 @@ class HiveService {
   }
 
   // ===================== جلسة المستخدم (كاش محلي) =====================
+
+  /// معرّف ثابت لهذا المتصفح (لتسجيل الجهاز ضمن حد الترخيص)
+  String webDeviceId() {
+    var id = _settingsBox.get('web_device_id') as String?;
+    if (id == null) {
+      id = 'web-${const Uuid().v4()}';
+      _settingsBox.put('web_device_id', id);
+    }
+    return id;
+  }
 
   String? getAuthToken() => _settingsBox.get('auth_jwt_token') as String?;
   Future<void> setAuthToken(String token) => _settingsBox.put('auth_jwt_token', token);

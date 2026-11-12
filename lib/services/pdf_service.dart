@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/permit_model.dart';
+import '../core/utils/attachment_storage.dart';
 import '../core/utils/date_utils.dart';
 
 class PdfService {
@@ -596,47 +597,36 @@ $band
     );
   }
 
-  List<_AttachedImage> _collectLocalImages(PermitModel permit) {
-    final localImages = <_AttachedImage>[];
-    if (kIsWeb) return localImages;
+  /// صور المرفقات (من الخادم أو من الجهاز) لإلحاقها بملف الإجازة
+  Future<List<_AttachedImage>> _collectImages(PermitModel permit) async {
+    final images = <_AttachedImage>[];
     for (final path in permit.attachmentUrls) {
       final lower = path.toLowerCase();
-      if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png')) {
-        final file = File(path);
-        if (file.existsSync()) {
-          try {
-            localImages.add(_AttachedImage(
-              image: pw.MemoryImage(file.readAsBytesSync()),
-              fileName: path.split('/').last.split('\\').last,
-            ));
-          } catch (_) {}
-        }
-      }
+      if (!(lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png'))) continue;
+      final bytes = await AttachmentStorage.readBytes(path);
+      if (bytes == null) continue;
+      images.add(_AttachedImage(image: pw.MemoryImage(bytes), fileName: AttachmentStorage.displayName(path)));
     }
-    return localImages;
+    return images;
   }
 
-  /// بطاقة إجازة فردية بالتصميم الرسمي + الصور المرفقة (الأنظمة المحلية)
-  Future<File> buildSinglePermitPdf(PermitModel permit) async {
-    final assets = await _loadAssets();
-    final doc = pw.Document();
-    doc.addPage(_buildPermitDetailsPage(assets, permit));
-    for (final attached in _collectLocalImages(permit)) {
-      doc.addPage(_buildAttachmentPage(assets, permit, attached));
-    }
-    final bytes = await doc.save();
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/permit_${permit.permitYear}_${permit.permitNumber}.pdf');
-    await file.writeAsBytes(bytes);
-    return file;
-  }
-
-  /// توليد بايتات PDF لتفاصيل الإجازة (يعمل على الويب والكمبيوتر والهاتف)
+  /// ملف الإجازة بالتصميم الرسمي + الصور المرفقة (يعمل على الويب والهاتف والكمبيوتر)
   Future<Uint8List> buildSinglePermitPdfBytes(PermitModel permit) async {
     final assets = await _loadAssets();
     final doc = pw.Document();
     doc.addPage(_buildPermitDetailsPage(assets, permit));
+    for (final attached in await _collectImages(permit)) {
+      doc.addPage(_buildAttachmentPage(assets, permit, attached));
+    }
     return doc.save();
+  }
+
+  Future<File> buildSinglePermitPdf(PermitModel permit) async {
+    final bytes = await buildSinglePermitPdfBytes(permit);
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/permit_${permit.permitYear}_${permit.permitNumber}.pdf');
+    await file.writeAsBytes(bytes);
+    return file;
   }
 
   /// بطاقة الباركود المنفصلة (مقاس A6) — للطباعة واللصق على ملف الإجازة

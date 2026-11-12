@@ -30,7 +30,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Future<void> _bootstrap() async {
     if (!mounted) return;
     context.read<AuthProvider>().restoreSession();
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 150)); // انتقال ناعم فقط، الجلسة تُستعاد فوراً
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
     Widget target;

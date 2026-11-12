@@ -12,7 +12,9 @@ updates.get('/check/:platform', async (c) => {
     .first();
 
   if (!updateInfo) return c.json({ error: 'المنصة غير مدعومة' }, 404);
-  return c.json(updateInfo);
+  // mandatory كقيمة منطقية: النسخ المثبّتة القديمة تقرأه بـ `as bool?`
+  // ورقم (0/1) من D1 كان يُسقط الفحص بصمت فلا يظهر التحديث أبداً.
+  return c.json({ ...updateInfo, mandatory: Boolean(updateInfo.mandatory) });
 });
 
 // تعديل التحديث (المدير فقط)

@@ -3,7 +3,7 @@ description: >
   نظام إدارة إجازات البناء المؤسسي - Flutter (موبايل + ويندوز)
   مزامنة لحظية عبر Supabase + تخزين محلي Hive (Offline-First)
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -64,17 +64,19 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.13.1
 
+# أيقونة أندرويد = أيقونة تطبيق الويب (PWA): شعار المديرية
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: false
-  image_path: "assets/icons/app_icon.jpg"
+  image_path: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#1B3D5E"
+  adaptive_icon_foreground: "assets/icons/app_icon_foreground.png"
 
 flutter:
   uses-material-design: true
 
   assets:
     - assets/images/
-    - assets/icons/
 
   fonts:
     - family: Cairo

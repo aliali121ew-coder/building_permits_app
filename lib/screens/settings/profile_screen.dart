@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb, Uint8List;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
@@ -28,6 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _confirmPasswordCtrl;
 
   String? _localAvatarPath;
+  Uint8List? _webAvatarBytes; // المتصفح: الصورة المختارة كبايتات
   bool _saving = false;
   bool _obscureOldPassword = true;
   bool _obscurePassword = true;
@@ -60,7 +62,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _pickImage() async {
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.gallery);
+      final picked = await picker.pickImage(source: ImageSource.gallery, maxWidth: 600, imageQuality: 85);
+      if (picked != null && kIsWeb) {
+        final bytes = await picked.readAsBytes();
+        if (mounted) setState(() => _webAvatarBytes = bytes);
+        return;
+      }
       if (picked != null) {
         if (!mounted) return;
         // نفتح شاشة قص الصورة المخصصة
@@ -116,6 +123,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         birthDate: _birthDateCtrl.text.trim().isNotEmpty ? _birthDateCtrl.text.trim() : null,
         phoneNumber: _phoneCtrl.text.trim().isNotEmpty ? _phoneCtrl.text.trim() : null,
         avatarPath: _localAvatarPath,
+        avatarBytes: _webAvatarBytes,
       );
 
       // 2. تحديث كلمة المرور إذا تم إدخالها
@@ -202,7 +210,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 spreadRadius: 2,
                               ),
                             ],
-                            image: _localAvatarPath != null
+                            image: _webAvatarBytes != null
+                                ? DecorationImage(image: MemoryImage(_webAvatarBytes!), fit: BoxFit.cover)
+                                : _localAvatarPath != null && (kIsWeb ? _localAvatarPath!.startsWith('http') : true)
                                 ? DecorationImage(
                                     image: _localAvatarPath!.startsWith('http')
                                         ? NetworkImage(_localAvatarPath!)
@@ -211,7 +221,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   )
                                 : null,
                           ),
-                          child: _localAvatarPath == null
+                          child: _localAvatarPath == null && _webAvatarBytes == null
                               ? Center(
                                   child: Text(
                                     user?.fullName.isNotEmpty == true ? user!.fullName[0] : 'م',
