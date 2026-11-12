@@ -21,26 +21,25 @@
   <title>إجازات البناء</title>
 
   <style>
-    html, body { margin: 0; height: 100%; background: #0F1E30; }
+    html, body { margin: 0; height: 100%; background: #FFFFFF; }
     /* شاشة افتتاح فورية (HTML خفيف) تظهر قبل تحميل محرك التطبيق */
     #splash {
       position: fixed; inset: 0; z-index: 9999;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
-      background: linear-gradient(135deg, #1B3D5E, #2A5C8A);
+      background: #FFFFFF;
       font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
-      color: #fff; transition: opacity .35s ease;
+      color: #1B3D5E; transition: opacity .35s ease;
     }
     #splash.hide { opacity: 0; pointer-events: none; }
     #splash img {
       width: 96px; height: 96px; border-radius: 50%;
-      background: #fff; border: 3px solid rgba(255,255,255,.35);
-      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+      background: #fff; box-shadow: 0 8px 24px rgba(27,61,94,.18);
     }
     #splash .t { font-size: 22px; font-weight: 700; }
     #splash .s { font-size: 13px; opacity: .8; margin-top: -10px; }
-    #splash .bar { width: 140px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.2); overflow: hidden; }
+    #splash .bar { width: 140px; height: 4px; border-radius: 4px; background: rgba(27,61,94,.15); overflow: hidden; }
     #splash .bar::after {
-      content: ""; display: block; width: 40%; height: 100%; border-radius: 4px; background: #fff;
+      content: ""; display: block; width: 40%; height: 100%; border-radius: 4px; background: #1B3D5E;
       animation: slide 1.1s ease-in-out infinite;
     }
     @keyframes slide { 0% { transform: translateX(260%); } 100% { transform: translateX(-120%); } }
