@@ -80,6 +80,32 @@
       return p.userChoice.then(function (r) { return r.outcome; });
     };
 
+    // ---- معاينة الكاميرا على iPhone: Safari لا يعرض الفيديو داخل الصفحة بدون playsinline ----
+    (function () {
+      function inline(v) {
+        v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+        v.playsInline = true; v.muted = true; v.setAttribute('muted', '');
+      }
+      var play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (this.tagName === 'VIDEO') inline(this);
+        return play.apply(this, arguments);
+      };
+      // عند إدراج الفيديو في الصفحة بعد تشغيله قد يتوقف: نعيد تشغيله
+      new MutationObserver(function (list) {
+        list.forEach(function (m) {
+          m.addedNodes.forEach(function (n) {
+            if (!n.querySelectorAll) return;
+            var vids = n.tagName === 'VIDEO' ? [n] : n.querySelectorAll('video');
+            Array.prototype.forEach.call(vids, function (v) {
+              inline(v);
+              if (v.srcObject && v.paused) v.play().catch(function () {});
+            });
+          });
+        });
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    })();
+
     // ---- باركود الإجازة: الرابط …/#p=2026/77 يفتح تفاصيلها بعد تسجيل الدخول ----
     var permitLink = '';
     (function () {
