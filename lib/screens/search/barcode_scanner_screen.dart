@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -19,7 +21,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   final MobileScannerController _scannerController = MobileScannerController(
     detectionSpeed: DetectionSpeed.normal,
     facing: CameraFacing.back,
+    autoStart: !kIsWeb,
   );
+  StreamSubscription<BarcodeCapture>? _webSub;
   final TextEditingController _manualCtrl = TextEditingController();
   bool _isShowingDetail = false;
 
@@ -27,13 +31,63 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   void initState() {
     super.initState();
     // في المتصفحات بلا قارئ مدمج (iPhone / ويندوز) تُحمَّل مكتبة القراءة من موقعنا لا من CDN خارجي
-    if (kIsWeb) MobileScannerPlatform.instance.setBarcodeLibraryScriptUrl('zxing/reader.js');
+    if (kIsWeb) {
+      MobileScannerPlatform.instance.setBarcodeLibraryScriptUrl('zxing/reader.js');
+      // على الويب نعرض الكاميرا بأنفسنا بملء المساحة: ودجت المكتبة يأخذ مقاس الفيديو لحظة التشغيل
+      // وهو 0×0 على iPhone فتعمل القراءة لكن المعاينة لا تظهر.
+      // ignore: invalid_use_of_internal_member
+      _scannerController.attach();
+      _webSub = _scannerController.barcodes.listen(_onCapture);
+      _scannerController.start().catchError((_) {});
+    }
+  }
+
+  void _onCapture(BarcodeCapture capture) {
+    if (_isShowingDetail) return;
+    for (final barcode in capture.barcodes) {
+      final raw = barcode.rawValue;
+      if (raw != null && raw.trim().isNotEmpty) {
+        _handleCodeDetected(raw);
+        break;
+      }
+    }
+  }
+
+  Widget _webCameraView() {
+    return ValueListenableBuilder<MobileScannerState>(
+      valueListenable: _scannerController,
+      builder: (context, state, _) {
+        final error = state.error;
+        Widget child;
+        if (error != null) {
+          final denied = error.errorCode == MobileScannerErrorCode.permissionDenied;
+          child = Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                denied
+                    ? 'لم يُسمح باستخدام الكاميرا. فعّل إذن الكاميرا لهذا الموقع من إعدادات المتصفح'
+                    : 'تعذّر تشغيل الكاميرا، يمكنك إدخال رقم الإجازة في الأسفل',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontFamily: 'Cairo', fontSize: 14),
+              ),
+            ),
+          );
+        } else if (!state.isRunning) {
+          child = const Center(child: CircularProgressIndicator(color: Colors.white));
+        } else {
+          child = SizedBox.expand(child: _scannerController.buildCameraView());
+        }
+        return ColoredBox(color: Colors.black, child: child);
+      },
+    );
   }
   bool _torchEnabled = false;
   String? _lastScannedRaw;
 
   @override
   void dispose() {
+    _webSub?.cancel();
     _scannerController.dispose();
     _manualCtrl.dispose();
     super.dispose();
@@ -118,19 +172,13 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                MobileScanner(
-                  controller: _scannerController,
-                  onDetect: (capture) {
-                    if (_isShowingDetail) return;
-                    for (final barcode in capture.barcodes) {
-                      final raw = barcode.rawValue;
-                      if (raw != null && raw.trim().isNotEmpty) {
-                        _handleCodeDetected(raw);
-                        break;
-                      }
-                    }
-                  },
-                ),
+                if (kIsWeb)
+                  _webCameraView()
+                else
+                  MobileScanner(
+                    controller: _scannerController,
+                    onDetect: _onCapture,
+                  ),
 
                 // إطار التوجيه البصري في وسط الكاميرا
                 Container(
